@@ -71,6 +71,200 @@ OPENAI_KEY=YOUR_OPENAI_KEY # for OpenAI gpt models
 - EDF: General EEG recordings
 - FIF: General EEG recordings
 - MAT: SPIS dataset files only
+- EEG: Native Compumedics ProfusionEEG 4 studies, read in place with no EDF export (see below)
+
+### Patient information and recording conditions
+
+`recording.py` fills SCORE's first two report sections — *Patient information* and
+*Recording conditions* — entirely from metadata the study already carries, and the
+PDF now opens with them the way a SCORE report does. Nothing on that page is a
+proposal: name, sex, date of birth, age at recording, date and time, acquisition
+and analysis sample rates, sensor group, review filters, device, montage and study
+format are all read, not inferred. Fields a technologist observes rather than the
+signal shows — alertness and cooperation, time of last meal, skull defect — are
+listed as outstanding rather than guessed.
+
+It also holds the **duration accountant**, which reports three different numbers
+that are easy to conflate:
+
+| | Demo.eeg |
+| --- | --- |
+| Recorded in the study | 1:45:48 |
+| Loaded for analysis | 0:01:49 |
+| Analysed after artifact rejection | 56 s — 51% of what was loaded |
+
+This matters beyond bookkeeping. Every SCORE incidence and prevalence band is a
+rate, and the denominator must be the duration actually examined. A pipeline that
+discards half its epochs and then divides by the recording length halves every
+rate it reports.
+
+### Artifact types, scored against SCORE
+
+`artifacts.py` names the artifact types present using SCORE's vocabulary
+(Table 15), and the PDF gains an **EEG Artifacts** page giving each one a type, a
+location, and how much of the recording it covers. `score_common.py` holds the
+shared SCORE machinery both this and future modules need: the mapping from
+electrodes to laterality × region with a location maximum, and the incidence and
+prevalence bands from SCORE's Table 6.
+
+Detected: 50/60 Hz mains, electrode pops, flat or disconnected electrodes, salt
+bridges, eye blinks, horizontal eye movements, ECG and pulse artifact, EMG,
+chewing, sweat, movement, and respiration (only where a respiration channel
+confirms it).
+
+Not detected, and left for the reader: nystagmus, sucking, glossokinetic, rocking
+or patting, dialysis, artificial ventilation and induction — these need clinical
+context or are not separable from the signal alone. **Significance is never
+proposed.** SCORE scores an artifact's effect on the recording separately — not
+interpretable, reduced diagnostic value, or does not interfere — and that is a
+clinical judgement.
+
+Classification runs on the recording **as loaded**, inside `getRawData` before the
+pipeline filters, re-references, resamples and drops channels. Several of these
+artifacts are invisible afterwards: sweat lives below 0.5 Hz, mains sits above the
+resampled Nyquist, and ECG detection needs the ECG channel. Set
+`classifyArtifacts=False` on `eegProcess` to skip it; it costs well under a second.
+
+Detectors are deterministic and physically motivated rather than learned, so a
+finding can be explained and points at a time and a set of electrodes — which an
+ICA component label cannot. Amplitude-based tests are relative to the recording's
+own baseline, because absolute microvolt thresholds depend on the reference and
+the acquisition gain.
+
+### Posterior dominant rhythm, scored against SCORE
+
+`pdr.py` scores the posterior dominant rhythm on all nine properties SCORE
+defines for it (Beniczky et al., *Clin Neurophysiol* 2017;128:2334–2346, Table 4),
+and the PDF gains a **Posterior Dominant Rhythm** page listing each one with the
+measurement behind it and a confidence:
+
+| Property | How it is derived |
+| --- | --- |
+| Significance | Frequency against an **age-dependent** normal floor, plus symmetry and reactivity |
+| Frequency | The model ensemble, cross-checked against the posterior spectral peak |
+| Frequency asymmetry | Difference of the per-hemisphere estimates; symmetrical within 0.5 Hz |
+| Amplitude | Median peak-to-peak in a band centred on the measured rhythm; SCORE bands at 20 and 70 µV |
+| Amplitude asymmetry | Relative difference of left and right posterior amplitude |
+| Reactivity to eye opening | Posterior band-power drop on eye opening, per side — needs eye-state annotations |
+| Organization | **Provisional**: rhythm continuity and spectral concentration |
+| Caveat | Eyes never closed, sleep deprivation, or drowsiness where separable |
+| Absence of PDR | Only when no posterior rhythm is found, with the reason |
+
+Two behaviours are deliberate. A property the recording cannot answer is scored
+`Not possible to determine` — SCORE's own active choice — rather than guessed:
+without a date of birth there is no significance, and without marked eye opening
+there is no reactivity.
+
+Reactivity can be unlocked on unmarked recordings with **Infer eye state from the
+signal** in the study browser (`--auto-eye-state` on the command line, `autoEyeState`
+in an options file). It is off by default because it is not trustworthy yet: on a
+continuously eyes-closed test recording it split the record into two states and
+reported reduced left-sided reactivity that was not there, since posterior alpha
+waxes and wanes severalfold under continuous eye closure and frontal slow activity
+is not specific enough to blinks to rule that out. A false reduced reactivity drives
+the significance of the whole PDR to abnormal, so treat any reactivity it produces as
+unconfirmed. Marking eye opening and closure at acquisition is the reliable route. And properties resting on uncalibrated thresholds are
+marked provisional in the report, because the numeric thresholds in `pdr.py` are
+conventional values, not values validated against expert scoring. They are
+gathered in one block at the top of that file for exactly that reason.
+
+**Age** drives the significance of the PDR, whose normal lower limit rises through
+childhood — a fixed adult threshold reports every young child as abnormally slow.
+Age is resolved from, in order: an explicit `patientAge`; an explicit
+`patientDob` with the recording date; the study's own `EEG4PatientInfo.xml`. The
+study browser passes the date of birth from `_CMPStudyList.mdb`, which holds it as
+a real date — the study's own copy is numeric with no day/month marker, so it is
+read month-first and flagged in the report for confirmation.
+
+### Native ProfusionEEG studies
+
+A ProfusionEEG study is a `*.eeg` **folder** (containing `*.sdy`, `EEGData/`, and so
+on), not a single file. Pass the folder itself:
+
+```bash
+python report.py "C:\Studies\Demo.eeg" --pdf --out ./reports
+```
+
+Signal access goes through Compumedics' own `cmpeeg` Python extension, which wraps
+the same `CMEEGStudyV4` COM component ProfusionEEG itself uses, so the study format
+stays the single source of truth. Studies are opened read-only. `profusion.py` holds
+the reader; `readStudyMetadata()` there reports a study's montage and sample rate
+straight from its `.sdy` XML, which needs no SDK and is useful for checking a study
+before a full run.
+
+Two options apply only to this format:
+
+- `--segment {longest,concat}`: a study may contain gaps where data packets were
+  lost, and a read must never cross one. `longest` (the default) analyses the
+  single biggest gap-free block; `concat` joins every recorded block end-to-end,
+  which recovers more signal from a fragmented study at the cost of a
+  discontinuity at each join. Each join is annotated `BAD_segment_join` so epoch
+  rejection drops any epoch straddling it.
+- `--max-seconds <n>`: cap how much signal is loaded, for long overnight studies.
+
+ProfusionEEG events (spikes, photic, bookmarks, and so on) are carried across as MNE
+annotations.
+
+#### Study browser (GUI)
+
+A folder of ProfusionEEG studies carries a `_CMPStudyList.mdb` index at its root.
+`study_browser.py` reads it, lists the studies, and generates a report for the one
+you pick:
+
+```bash
+python study_browser.py "C:\Studies"
+```
+
+The folder argument is optional — the browser remembers the last one used, and has a
+Browse button. The study table shows recording date, patient name, date of birth,
+sex, duration, sample rate and whether the montage carries all 19 required
+electrodes, so an unusable study is visible before anything is run. Every report
+option is settable in the window: output folder, PDF, LLM report with language and
+model, data-segment handling, load cap, analysis start/end, artifact repair, the
+epoch-drop threshold, the bad-electrode ratio, and channel-name mapping.
+
+Reports are generated by spawning `study_runner.py` as a subprocess, so the window
+stays responsive, the log streams live, and Cancel actually stops the work. Each run
+writes its options next to the report as `<study>_options.json`, which re-runs the
+same analysis on its own:
+
+```bash
+python study_runner.py reports/Demo_options.json
+```
+
+Reading `_CMPStudyList.mdb` needs the **64-bit** Microsoft Access ODBC driver
+(*Microsoft Access Database Engine*) and `pyodbc`. Without the driver the browser
+falls back to listing `*.eeg` folders from disk and says so — you can still select
+and run a study, just without the patient details the database holds.
+
+#### Requirements
+
+The `cmpeeg` extension is **not** installed by `pip` — it is built from
+`ProfusionEEGSDK/PythonSDK/cmpeeg`, and `profusion.py` finds it automatically in that
+project's `x64\Release` or `x64\Debug` output. Set `CMPEEG_PYD_DIR` to override the
+location. Because it is a compiled extension talking to an in-process COM server, it
+needs:
+
+- **64-bit Python 3.12** — the same version the `.pyd` was built against.
+- The **x64** `CMEEGStudyV4.dll` and `RawDataAccess.dll` from `ProfusionEEGSDK/x64/`
+  registered with `regsvr32` from an elevated prompt. A ProfusionEEG application
+  install registers only the 32-bit build of these, which an x64 Python cannot load
+  in-process; the x64 registration lives in a separate registry view and does not
+  disturb it. Note that registration records the **absolute path** of the DLL, so
+  moving this checkout means re-running `regsvr32` from the new location.
+
+See `ProfusionEEGSDK/PythonSDK/README.md` for the full build and registration
+procedure. That document assumes a stand-alone Python at
+`C:\Program Files\Python312\`; to build against this project's `.venv` instead,
+`.py312root/` in the project root is a junction tree laying out the headers, import
+library and pybind11 includes where `cmpeeg.vcxproj` expects them:
+
+```powershell
+$env:PYTHON312_64_ROOT = "<project>\.py312root"
+& "<vs>\MSBuild\Current\Bin\amd64\MSBuild.exe" `
+    ProfusionEEGSDK\PythonSDK\cmpeeg\cmpeeg\cmpeeg.sln `
+    /p:Configuration=Release /p:Platform=x64 /t:Rebuild
+```
 
 
 ### Required EEG Channels
@@ -100,7 +294,8 @@ python report.py <eeg_file> [options]
 ```
 
 #### Required Parameters
-- `eeg_file`: Path to the input EEG data file (EDF, FIF, or MAT format)
+- `eeg_file`: Path to the input EEG data file (EDF, FIF, or MAT format), or to a
+  native ProfusionEEG study folder (`*.eeg`)
 
 #### Optional Parameters
 - `--pdf`: Generate output in PDF format
@@ -116,6 +311,12 @@ python report.py <eeg_file> [options]
 - `--llm <model>`: Specify LLM model for report generation
   - Default: "gemini-1.5-pro" 
   - Suggestions: "gemini-1.5-pro", "claude-3-5-sonnet-20240620", "gpt-4o"
+- `--segment {longest,concat}`: ProfusionEEG studies only — which data segments to
+  analyse (default: `longest`). See *Native ProfusionEEG studies* above.
+- `--max-seconds <n>`: ProfusionEEG studies only — cap how much signal is loaded.
+- `--auto-eye-state`: infer eyes-open/eyes-closed periods from the signal where the
+  recording carries no eye-state annotations, so PDR reactivity can be scored. Off
+  by default — see *Posterior dominant rhythm* above for why.
 
 ### Example Commands
 

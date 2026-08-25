@@ -1,0 +1,48 @@
+# Core numerics / signal processing
+numpy<2.2
+scipy
+pandas
+matplotlib
+seaborn
+scikit-learn
+statsmodels
+tqdm
+PyWavelets
+librosa
+
+# EEG I/O and visualisation
+mne
+mne-qt-browser
+PyQt6
+pymatreader
+
+# Artifact detection / information theory
+pyod
+dit
+pyinform
+
+# Deep learning (background-frequency regression models)
+tensorflow
+
+# LLM providers
+google-generativeai
+anthropic
+openai
+
+# Report rendering
+markdown
+beautifulsoup4
+fpdf2
+
+# ProfusionEEG study-list database (_CMPStudyList.mdb) for study_browser.py.
+# Also needs the 64-bit Microsoft Access ODBC driver installed on the machine.
+pyodbc
+
+# Config / notebook support
+python-dotenv
+ipykernel
+ipywidgets
+
+# Build-only: needed to compile the cmpeeg extension for native ProfusionEEG
+# study support (ProfusionEEGSDK/PythonSDK/cmpeeg). Not used at runtime.
+pybind11

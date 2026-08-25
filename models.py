@@ -9,6 +9,52 @@
 # 7. evaluateRegression: metrics for evaluating the regression model.
 ############################################
 
+import os
+
+# TensorFlow reads these when it is imported, so they have to be set first.
+# They used to sit below the keras import, where they had no effect at all -
+# which is why the oneDNN banner appeared on every run. setdefault so an
+# environment variable set by the caller still wins.
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
+os.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
+
+
+def _guardPlatformProcessor():
+    """Stop a slow WMI query from killing the run while h5py is importing.
+
+    h5py materialises platform.uname(), which on Windows asks WMI for the CPU
+    description. When WMI is slow to answer - 2.7 s on this machine from cold -
+    CPython raises WinError 258, then falls back to a second WMI query whose
+    result it unpacks without checking, so the run dies with
+    KeyError: 'Architecture' before any analysis starts.
+
+    Setting PROCESSOR_IDENTIFIER does not help: the fallback is written as
+    os.environ.get('PROCESSOR_IDENTIFIER', _get_machine_win32()), and Python
+    evaluates that default argument eagerly, so the WMI call happens either way.
+
+    The value is cosmetic for everything in this pipeline, so an empty string is
+    a better answer than an exception.
+    """
+    import platform
+    processorClass = getattr(platform, '_Processor', None)
+    if processorClass is None or getattr(processorClass, '_eegGuarded', False):
+        return
+    original = processorClass.get
+
+    def safeGet():
+        try:
+            return original()
+        except Exception as e:
+            print('platform.processor() unavailable (%s: %s) - continuing without it'
+                  % (type(e).__name__, e))
+            return ''
+
+    processorClass.get = staticmethod(safeGet)
+    processorClass._eegGuarded = True
+
+
+_guardPlatformProcessor()
+
 from sklearn.metrics import r2_score
 import numpy as np
 import keras
@@ -17,12 +63,8 @@ from keras import models
 from keras import layers
 from keras.layers import Dense, Conv2D, Flatten, MaxPooling2D
 import matplotlib.pyplot as plt
-import os
 import pandas as pd
 import ast
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 
 def getInputPSD( psds):

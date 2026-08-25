@@ -12,6 +12,7 @@ from scipy import signal
 import numpy as np
 import os
 import mne
+import pdr as pdrScore
 
 mne.viz.set_browser_backend('matplotlib')
 
@@ -91,8 +92,13 @@ class writePDF:
     
         
         pdf.set_font(fontName, size=18)
+
+        # First, the way a SCORE report opens: who was recorded and under what
+        # conditions, before any finding.
+        self.writeRecordingPage(pdf, fontName, line_height, results.get('recording'))
+
         pdf.add_page(orientation = 'P')
-        # set page horizontal    
+        # set page horizontal
         # eeg5.jpg
         pdf.cell(196, line_height, text='Power Spectrum Topomap', ln=1, align='C')
         # pdf.set_font(fontName, size=12)
@@ -109,202 +115,197 @@ class writePDF:
         pdf.image(jpgFile, x=0, w=196)
 
         
-        if self.ai_report_text:
-            # write ai report to a page, ai_report_text is a multi-line string            
-            pdf.add_page()
-            pdf.set_font(fontName, size=18)
-            pdf.cell(196, line_height, text='EEG AI Analysis', ln=1, align='C')
-            # draw a line 
-            pdf.set_draw_color(0, 0, 0)
-            pdf.set_line_width(0.5)
-            pdf.line(10, 20, 200, 20)
-            pdf.set_font(fontName, size=13)
-            pdf.multi_cell(196, line_height-1, self.ai_report_text, 0, 'L')
+        # The structured findings are the substance of the report, so they are
+        # always rendered. The LLM narrative, when requested, is added at the end
+        # as a summary of them. It used to replace this table and the three figure
+        # pages below, so enabling --ai silently produced a much shorter report.
+        # 第一頁
+        pdf.set_font(fontName, size=18)
+        pdf.add_page()
+        # 標題
+        pdf.cell(200, 16, text='Computer EEG anlysis - '+self.fileName, ln=1, align='C',border=0)
 
-        else:
-            # 第一頁
-            pdf.set_font(fontName, size=18)
-            pdf.add_page()
-            # 標題
-            pdf.cell(200, 16, text='Computer EEG anlysis - '+self.fileName, ln=1, align='C',border=0)
+        # 文字大小
+        pdf.set_font(fontName, size=13)
+        pdf.cell(200, 8, text='(Informal Report)', ln=1, align='C',border=0)
 
-            # 文字大小
-            pdf.set_font(fontName, size=13)
-            pdf.cell(200, 8, text='(Informal Report)', ln=1, align='C',border=0)
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Drop epochs ratio', ln=0, align='L', border=1)
+        #epochs比例
+        color= (0, 0, 0)
+        if removeEpochsRatio>=75:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(46, line_height, text=' '+str(removeEpochsRatio)+'%', ln=0, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(24, line_height, text=' ', ln=1, align='L', border=1)
 
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Drop epochs ratio', ln=0, align='L', border=1)
-            #epochs比例
-            color= (0, 0, 0)
-            if removeEpochsRatio>=75:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(46, line_height, text=' '+str(removeEpochsRatio)+'%', ln=0, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(24, line_height, text=' ', ln=1, align='L', border=1)
-
-            # 振幅
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Amplitudes(μV)', ln=0, align='L', border=1)
-            # text='α: '+str(round(amplitudes[0], 1))+' β: '+str(round(amplitudes[1], 1))+' θ: '+str(round(amplitudes[2], 1))+' δ: '+str(round(amplitudes[3], 1))
-            pdf.cell(17, line_height, text='α: '+str(round(amplitudes['alpha'], 1)), ln=0, align='L', border=1)
-            pdf.cell(17, line_height, text='β: '+str(round(amplitudes['beta'], 1)), ln=0, align='L', border=1)
-            pdf.cell(17, line_height, text='θ: '+str(round(amplitudes['theta'], 1)), ln=0, align='L', border=1)
-            pdf.cell(19, line_height, text='δ: '+str(round(amplitudes['delta'], 1)), ln=1, align='L', border=1)
+        # 振幅
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Amplitudes(μV)', ln=0, align='L', border=1)
+        # text='α: '+str(round(amplitudes[0], 1))+' β: '+str(round(amplitudes[1], 1))+' θ: '+str(round(amplitudes[2], 1))+' δ: '+str(round(amplitudes[3], 1))
+        pdf.cell(17, line_height, text='α: '+str(round(amplitudes['alpha'], 1)), ln=0, align='L', border=1)
+        pdf.cell(17, line_height, text='β: '+str(round(amplitudes['beta'], 1)), ln=0, align='L', border=1)
+        pdf.cell(17, line_height, text='θ: '+str(round(amplitudes['theta'], 1)), ln=0, align='L', border=1)
+        pdf.cell(19, line_height, text='δ: '+str(round(amplitudes['delta'], 1)), ln=1, align='L', border=1)
 
 
-            
-            # 慢波比例
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Slow wave ratio', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
-            pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
+        
+        # 慢波比例
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Slow wave ratio', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
+        pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
 
-            #  左右、總慢波比例
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' <60', ln=0, align='R', border=1)
-            color= (0, 0, 0)
-            if right_slow_ratio>=60:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(right_slow_ratio)+'%', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if left_slow_ratio>=60:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(left_slow_ratio)+'%', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if total_slow_ratio>=60:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(24, line_height, text=' '+str(total_slow_ratio)+'%', ln=1, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
+        #  左右、總慢波比例
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' <60', ln=0, align='R', border=1)
+        color= (0, 0, 0)
+        if right_slow_ratio>=60:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(right_slow_ratio)+'%', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if left_slow_ratio>=60:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(left_slow_ratio)+'%', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if total_slow_ratio>=60:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(24, line_height, text=' '+str(total_slow_ratio)+'%', ln=1, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
 
-            # 快波比例
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Beta wave ratio', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
-            pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
+        # 快波比例
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Beta wave ratio', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
+        pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
 
-            #  左右、
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' <30', ln=0, align='R', border=1)
-            color= (0, 0, 0)
-            if right_beta_ratio>=30:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
+        #  左右、
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' <30', ln=0, align='R', border=1)
+        color= (0, 0, 0)
+        if right_beta_ratio>=30:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
 
-            pdf.cell(23, line_height, text=' '+str(right_beta_ratio)+'%', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if left_beta_ratio>=30:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(left_beta_ratio)+'%', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if total_beta_ratio>=30:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(24, line_height, text=' '+str(total_beta_ratio)+'%', ln=1, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
+        pdf.cell(23, line_height, text=' '+str(right_beta_ratio)+'%', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if left_beta_ratio>=30:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(left_beta_ratio)+'%', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if total_beta_ratio>=30:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(24, line_height, text=' '+str(total_beta_ratio)+'%', ln=1, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
 
-            # 前後gradient
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' AP gradient', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
-            pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
-            pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
+        # 前後gradient
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' AP gradient', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Right', ln=0, align='L', border=1)
+        pdf.cell(23, line_height, text=' Left', ln=0, align='L', border=1)
+        pdf.cell(24, line_height, text=' Total', ln=1, align='L', border=1)
 
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' <40', ln=0, align='R', border=1)
-            color= (0, 0, 0)
-            if right_AP_difference>=40:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(right_AP_difference)+'%', ln=0, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
-            color= (0, 0, 0)
-            if left_AP_difference>=40:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(left_AP_difference)+'%', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if AP_difference>=40:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(24, line_height, text=' '+str(AP_difference)+'%', ln=1, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' <40', ln=0, align='R', border=1)
+        color= (0, 0, 0)
+        if right_AP_difference>=40:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(right_AP_difference)+'%', ln=0, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
+        color= (0, 0, 0)
+        if left_AP_difference>=40:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(left_AP_difference)+'%', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if AP_difference>=40:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(24, line_height, text=' '+str(AP_difference)+'%', ln=1, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
 
-            # O1, O2 主頻率
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Background peak', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if left_backgroud_frequency<8:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(23, line_height, text=' '+str(right_backgroud_frequency), ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if right_backgroud_frequency<8:
-                color=(255, 0, 0)
-            pdf.cell(23, line_height, text=' '+str(left_backgroud_frequency), ln=0, align='L', border=1)
-            pdf.set_text_color((0, 0, 0))
-            pdf.cell(24, line_height, text=' >=8', ln=1, align='L', border=1)
+        # O1, O2 主頻率
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Background peak', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if left_backgroud_frequency<8:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(23, line_height, text=' '+str(right_backgroud_frequency), ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if right_backgroud_frequency<8:
+            color=(255, 0, 0)
+        pdf.cell(23, line_height, text=' '+str(left_backgroud_frequency), ln=0, align='L', border=1)
+        pdf.set_text_color((0, 0, 0))
+        pdf.cell(24, line_height, text=' >=8', ln=1, align='L', border=1)
 
-            # O1, O2 主頻率差異
-            fDiff=left_backgroud_frequency-right_backgroud_frequency
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Background difference', ln=0, align='L', border=1)
-            color= (0, 0, 0)
-            if abs(fDiff)>0.5:
-                color=(255, 0, 0)
-            pdf.set_text_color(*color)
-            pdf.cell(46, line_height, text=' '+str(round(abs(fDiff), 2)), ln=0, align='L', border=1)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(24, line_height, text='<=0.5', ln=1, align='L', border=1)
+        # O1, O2 主頻率差異
+        fDiff=left_backgroud_frequency-right_backgroud_frequency
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Background difference', ln=0, align='L', border=1)
+        color= (0, 0, 0)
+        if abs(fDiff)>0.5:
+            color=(255, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.cell(46, line_height, text=' '+str(round(abs(fDiff), 2)), ln=0, align='L', border=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(24, line_height, text='<=0.5', ln=1, align='L', border=1)
 
-            # 左右channel差異，列出異常channel
-            # for ab in abnormals:
-            #     st=','.join(abnormals[ab]) 
-            #     # pdf.cell(200, line_height, text=ab+': '+st, ln=1, align='C')
-            #     pdf.cell(30, line_height, text='', ln=0, align='L')
-            #     pdf.cell(70, line_height, text=' '+ab, ln=0, align='L', border=1)
-            #     pdf.set_text_color(255, 0, 0)
-            #     pdf.cell(70, line_height, text=' '+st, ln=1, align='L', border=1)
-            #     pdf.set_text_color(0, 0, 0)
+        # 左右channel差異，列出異常channel
+        # for ab in abnormals:
+        #     st=','.join(abnormals[ab]) 
+        #     # pdf.cell(200, line_height, text=ab+': '+st, ln=1, align='C')
+        #     pdf.cell(30, line_height, text='', ln=0, align='L')
+        #     pdf.cell(70, line_height, text=' '+ab, ln=0, align='L', border=1)
+        #     pdf.set_text_color(255, 0, 0)
+        #     pdf.cell(70, line_height, text=' '+st, ln=1, align='L', border=1)
+        #     pdf.set_text_color(0, 0, 0)
 
-            
-            # bad channels
-            pdf.cell(30, line_height, text='', ln=0, align='L')
-            pdf.cell(70, line_height, text=' Bad electrodes', ln=0, align='L', border=1)
-            pdf.set_text_color(255, 0, 0)
-            pdf.cell(70, line_height, text=' '+','.join(bad_channels), ln=1, align='L', border=1)   
-            pdf.set_text_color(0, 0, 0)
+        
+        # bad channels
+        pdf.cell(30, line_height, text='', ln=0, align='L')
+        pdf.cell(70, line_height, text=' Bad electrodes', ln=0, align='L', border=1)
+        pdf.set_text_color(255, 0, 0)
+        pdf.cell(70, line_height, text=' '+','.join(bad_channels), ln=1, align='L', border=1)   
+        pdf.set_text_color(0, 0, 0)
 
 
-            # 新增頁面
-            pdf.add_page(orientation = 'L')
-            # set page horizontal    
-            # eeg5.jpg
-            pdf.cell(280, line_height, text='EEG, 4s/epochs', ln=0, align='C')
-            jpgFile = self.dest_folder+'eeg5.jpg'
-            pdf.image(jpgFile, x=10, y=20, w=280)
-            
-            # 第二頁
-            pdf.add_page()
-            pdf.set_font(fontName, size=18)
-            # 標題
-            pdf.cell(200, 20, text='Topography and Power Spectrum', ln=0, align='C')
-            jpgFile=self.dest_folder+'eeg3.jpg'
-            pdf.image(jpgFile, w=200, x=10, y=25)
+        # 新增頁面
+        pdf.add_page(orientation = 'L')
+        # set page horizontal    
+        # eeg5.jpg
+        pdf.cell(280, line_height, text='EEG, 4s/epochs', ln=0, align='C')
+        jpgFile = self.dest_folder+'eeg5.jpg'
+        pdf.image(jpgFile, x=10, y=20, w=280)
+        
+        # 第二頁
+        pdf.add_page()
+        pdf.set_font(fontName, size=18)
+        # 標題
+        pdf.cell(200, 20, text='Topography and Power Spectrum', ln=0, align='C')
+        jpgFile=self.dest_folder+'eeg3.jpg'
+        pdf.image(jpgFile, w=200, x=10, y=25)
 
-            # 第三頁
-            pdf.add_page()
-            pdf.set_font(fontName, size=18)
-            # 標題
-            pdf.cell(200, 20, text='Spectrogram', ln=0, align='C')
-            jpgFile=self.dest_folder+'eeg4.jpg'
-            pdf.image(jpgFile, w=200, x=10, y=25)
+        # 第三頁
+        pdf.add_page()
+        pdf.set_font(fontName, size=18)
+        # 標題
+        pdf.cell(200, 20, text='Spectrogram', ln=0, align='C')
+        jpgFile=self.dest_folder+'eeg4.jpg'
+        pdf.image(jpgFile, w=200, x=10, y=25)
+        self.writePdrPage(pdf, fontName, line_height, results.get('pdr'))
+        self.writeArtifactPage(pdf, fontName, line_height, results.get('artifacts'))
+        self.writeAiPage(pdf, fontName, line_height)
+
         outFile=self.dest_folder+self.fileName.split('.')[0]+'.pdf'
         pdf.output(outFile)
         print ('Successfully generate pdf file: ', outFile)
@@ -312,6 +313,338 @@ class writePDF:
         # os.system('start '+ outFile)
         
     
+    def writePdrPage(self, pdf, fontName, line_height, pdrResult):
+        """A page for the posterior dominant rhythm, scored against SCORE.
+
+        One row per SCORE property, carrying the scored term, the measurement it
+        came from, and how much to trust it. A property the recording cannot
+        answer says so, which SCORE treats as a real choice rather than a blank.
+        """
+        if not pdrResult:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Posterior Dominant Rhythm', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Scored against SCORE (Beniczky et al., Clin Neurophysiol 2017), Table 4',
+                 ln=1, align='C')
+        pdf.ln(2)
+
+        widths = (46, 62, 22, 66)
+        rowHeight = line_height - 1
+        pdf.set_font(fontName, size=9)
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Property', 'Scored term', 'Confidence', 'Measured'),
+                                widths)), rowHeight, fill=True)
+
+        for key, label in pdrScore.PROPERTY_ORDER:
+            prop = pdrResult.get(key)
+            if not prop:
+                continue
+            term = prop['term'] or '(not applicable)'
+            if prop.get('provisional'):
+                term += ' *'
+            # Abnormal findings and unscorable properties are the two things a
+            # reader must not skim past, so they are the only coloured rows.
+            if term.startswith('Abnormal') or 'Reduced' in term:
+                pdf.set_text_color(170, 0, 0)
+            elif prop['term'] == pdrScore.NOT_DETERMINED:
+                pdf.set_text_color(120, 120, 120)
+            else:
+                pdf.set_text_color(0, 0, 0)
+
+            measured = self._formatPdrValue(prop.get('value'))
+            self._row(pdf, ((label, widths[0]), (term, widths[1]),
+                            (prop.get('confidence', ''), widths[2]),
+                            (measured, widths[3])), rowHeight)
+            pdf.set_text_color(0, 0, 0)
+
+            # The measurement in full when the cell had to truncate it, then the
+            # basis - both wrapped, indented under the property name.
+            detail = prop.get('basis') or ''
+            if measured and pdf.get_string_width(measured) > widths[3] - 2.5:
+                detail = ('%s. %s' % (measured, detail)) if detail else measured
+            self._subLine(pdf, fontName, detail, widths[0], line_height - 3.5)
+            pdf.set_font(fontName, size=9)
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+        measures = pdrResult.get('measures') or {}
+        if measures:
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Underlying measurements', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for text in self._pdrMeasureLines(measures, pdrResult.get('age_source')):
+                pdf.cell(196, line_height - 2.5, text=text, ln=1, align='L')
+
+        notes = list(pdrResult.get('notes') or [])
+        if any(p and p.get('provisional') for p in pdrResult.values() if isinstance(p, dict)):
+            notes.append('* Provisional: derived from uncalibrated thresholds. '
+                         'Confirm visually before accepting.')
+        if notes:
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
+    def writeAiPage(self, pdf, fontName, line_height):
+        """The LLM narrative, as a closing summary of the structured findings."""
+        if not self.ai_report_text:
+            return
+        pdf.add_page()
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='EEG AI Analysis', ln=1, align='C')
+        # Underline the title at the current cursor rather than a fixed y - the
+        # old fixed y=20 sat below the title but above the body, so the rule was
+        # drawn straight through the first line of text.
+        pdf.set_draw_color(0, 0, 0)
+        pdf.set_line_width(0.4)
+        ruleY = pdf.get_y() + 1
+        pdf.line(pdf.l_margin, ruleY, pdf.w - pdf.r_margin, ruleY)
+        pdf.set_y(ruleY + 3)
+        pdf.set_font(fontName, size=12)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(196, line_height - 1.5, text=self.ai_report_text, align='L')
+        pdf.set_x(pdf.l_margin)
+    def writeRecordingPage(self, pdf, fontName, line_height, described):
+        """SCORE's patient and recording-conditions sections.
+
+        Pure metadata, so nothing here is a proposal. The fields a technologist
+        observes rather than the signal shows are listed as outstanding rather
+        than guessed.
+        """
+        if not described:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='EEG Report - ' + self.fileName, ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Sections follow SCORE (Beniczky et al., Clin Neurophysiol 2017)',
+                 ln=1, align='C')
+        pdf.ln(3)
+
+        def section(title, rows):
+            pdf.set_font(fontName, size=13)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(196, line_height, text=title, ln=1, align='L')
+            pdf.set_font(fontName, size=10)
+            for label, value in rows:
+                pdf.set_x(pdf.l_margin)
+                pdf.cell(58, line_height - 1.5, text='   ' + label, border=0, align='L')
+                # multi_cell leaves x at the right-hand edge, so the next label
+                # would otherwise start at the page margin.
+                pdf.multi_cell(138, line_height - 1.5, text=str(value), border=0,
+                               align='L')
+                pdf.set_x(pdf.l_margin)
+            pdf.ln(2)
+
+        section('Patient information', list(described['patient'].items()))
+        section('Recording conditions', list(described['conditions'].items()))
+
+        if described.get('duration_lines'):
+            pdf.set_font(fontName, size=13)
+            pdf.cell(196, line_height, text='Duration examined', ln=1, align='L')
+            pdf.set_font(fontName, size=10)
+            for line in described['duration_lines']:
+                pdf.multi_cell(196, line_height - 1.5, text='   ' + line, align='L')
+                pdf.set_x(pdf.l_margin)
+            pdf.set_font(fontName, size=8)
+            pdf.set_text_color(105, 105, 105)
+            pdf.multi_cell(196, line_height - 3.5, align='L',
+                           text='   Rates elsewhere in this report - how often an event '
+                                'occurs, what fraction of the recording a pattern covers - '
+                                'are taken over the analysed duration, not the recorded '
+                                'length.')
+            pdf.set_x(pdf.l_margin)
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+
+        outstanding = described.get('technologist_fields') or []
+        if outstanding:
+            pdf.set_font(fontName, size=13)
+            pdf.cell(196, line_height, text='For completion by the reader', ln=1, align='L')
+            pdf.set_font(fontName, size=10)
+            for field in outstanding:
+                pdf.cell(196, line_height - 1.5, text='   - ' + field, ln=1, align='L')
+            pdf.set_font(fontName, size=8)
+            pdf.set_text_color(105, 105, 105)
+            pdf.multi_cell(196, line_height - 3.5, align='L',
+                           text='   Observed at the bedside rather than derivable from the '
+                                'signal, so they are left blank rather than assumed. '
+                                'Referral details, modulators and procedures, and the '
+                                'diagnostic significance are likewise the reader\'s.')
+            pdf.set_x(pdf.l_margin)
+            pdf.set_text_color(0, 0, 0)
+
+        notes = described.get('notes') or []
+        if notes:
+            pdf.ln(2)
+            pdf.set_font(fontName, size=13)
+            pdf.cell(196, line_height, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
+    def writeArtifactPage(self, pdf, fontName, line_height, artifactResult):
+        """A page for the artifact types found, in SCORE's vocabulary.
+
+        Type, location and how much of the recording each covers. Significance -
+        whether an artifact leaves the recording uninterpretable, of reduced
+        value, or unaffected - is scored separately by SCORE and is the reader's
+        call, so it is not proposed here.
+        """
+        if not artifactResult:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='EEG Artifacts', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Scored against SCORE (Beniczky et al., Clin Neurophysiol 2017), '
+                      'Table 15 - %.0f s analysed' % artifactResult.get('analysed_seconds', 0),
+                 ln=1, align='C')
+        pdf.ln(2)
+
+        findings = artifactResult.get('findings') or []
+        if not findings:
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height, text='No artifact types detected.', ln=1, align='L')
+        else:
+            widths = (58, 74, 44, 20)
+            rowHeight = line_height - 1
+            pdf.set_font(fontName, size=9)
+            pdf.set_fill_color(232, 234, 240)
+            self._row(pdf, list(zip(('Artifact type', 'Location',
+                                     'Prevalence / incidence', 'Confidence'),
+                                    widths)), rowHeight, fill=True)
+
+            for f in findings:
+                timing = f.get('prevalence') or f.get('incidence') or ''
+                if f.get('count'):
+                    timing = ('%s (%d)' % (timing, f['count'])) if timing else str(f['count'])
+                location = f['location']['text']
+                self._row(pdf, ((f['name'], widths[0]), (location, widths[1]),
+                                (timing, widths[2]),
+                                (f.get('confidence', ''), widths[3])), rowHeight)
+
+                # A location naming several regions is longer than any sensible
+                # column, so repeat it in full below when it had to be cut.
+                detail = f.get('basis') or ''
+                if pdf.get_string_width(location) > widths[1] - 2.5:
+                    detail = ('%s. %s' % (location, detail)) if detail else location
+                self._subLine(pdf, fontName, detail, widths[0], line_height - 3.5)
+                pdf.set_font(fontName, size=9)
+
+        pdf.ln(3)
+        pdf.set_font(fontName, size=9)
+        pdf.set_text_color(105, 105, 105)
+        pdf.multi_cell(196, line_height - 3.5, align='L',
+                       text='Significance is not proposed. SCORE scores an artifact\'s '
+                            'effect on the recording separately - not interpretable, '
+                            'reduced diagnostic value, or does not interfere - and that '
+                            'is a clinical judgement. Types needing clinical context '
+                            '(nystagmus, sucking, glossokinetic, rocking or patting, '
+                            'dialysis, artificial ventilation, induction) are not '
+                            'detected and remain for the reader to add.')
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
+
+        notes = artifactResult.get('notes') or []
+        if notes:
+            pdf.ln(1)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
+    # ---------------------------------------------------------- table helpers
+    # fpdf2's multi_cell leaves the cursor at the right-hand edge of the cell it
+    # just drew, so anything written afterwards starts at the page margin unless
+    # x is put back. Every table below goes through these two helpers so that
+    # cannot be got wrong one row at a time.
+
+    @staticmethod
+    def _fit(pdf, text, width, padding=2.5):
+        """Truncate text to fit a fixed-width cell, since cell() does not wrap."""
+        text = '' if text is None else str(text)
+        if pdf.get_string_width(text) <= width - padding:
+            return text
+        while text and pdf.get_string_width(text + '...') > width - padding:
+            text = text[:-1]
+        return text + '...'
+
+    def _row(self, pdf, cells, line_height, fill=False, border=1):
+        """One table row of (text, width) pairs, ending back at the left margin."""
+        pdf.set_x(pdf.l_margin)
+        for text, width in cells:
+            pdf.cell(width, line_height, text=' ' + self._fit(pdf, text, width),
+                     border=border, align='L', fill=fill)
+        pdf.ln(line_height)
+
+    def _subLine(self, pdf, fontName, text, indent, line_height, size=8):
+        """A wrapped continuation line under a table row."""
+        if not text:
+            return
+        pdf.set_font(fontName, size=size)
+        pdf.set_text_color(105, 105, 105)
+        pdf.set_x(pdf.l_margin + indent)
+        pdf.multi_cell(196 - indent, line_height, text=str(text), border=0, align='L')
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
+
+    @staticmethod
+    def _formatPdrValue(value):
+        """Render a property's measurement compactly for the table cell."""
+        if value is None:
+            return ''
+        if isinstance(value, dict):
+            return ', '.join('%s %s' % (k, 'n/a' if v is None else v)
+                             for k, v in value.items())
+        if isinstance(value, float):
+            return '%g' % round(value, 3)
+        return str(value)
+
+    @staticmethod
+    def _pdrMeasureLines(measures, ageSource):
+        """The numbers behind the scored terms, as report lines."""
+        band = measures.get('pdr_band_hz')
+        lines = []
+        if measures.get('age_years') is not None:
+            lines.append('   Age at recording: %.1f years (normal PDR floor %.1f Hz)%s'
+                         % (measures['age_years'], measures.get('age_floor_hz') or 0,
+                            ' - from %s' % ageSource if ageSource else ''))
+        else:
+            lines.append('   Age at recording: unavailable%s'
+                         % (' - %s' % ageSource if ageSource else ''))
+        if band:
+            lines.append('   Measurement band: %g-%g Hz (centred on the measured rhythm)'
+                         % (band[0], band[1]))
+        lines.append('   Frequency: left %s Hz, right %s Hz; posterior spectral peak %s Hz'
+                     % (measures.get('frequency_left_hz'), measures.get('frequency_right_hz'),
+                        measures.get('posterior_peak_hz')))
+        lines.append('   Amplitude: left %s uV, right %s uV (peak-to-peak, median epoch)'
+                     % (measures.get('amplitude_left_uv'), measures.get('amplitude_right_uv')))
+        lines.append('   Epochs: %s total, %s eyes-closed, %s eyes-open'
+                     % (measures.get('epochs_total'), measures.get('epochs_eyes_closed'),
+                        measures.get('epochs_eyes_open')))
+        lines.append('   Eye state: %s' % measures.get('eye_state_basis', 'not determined'))
+        lines.append('   Rhythm continuity: %s; peak-to-broadband: %s; theta/alpha: %s'
+                     % (measures.get('rhythm_continuity'), measures.get('peak_prominence'),
+                        measures.get('theta_alpha_ratio')))
+        return lines
+
     def drawPsds(self, psds):   
         picks=['T5', 'T6', 'O1', 'O2', 'P3', 'P4']
         powers, freqs=psds.copy().get_data(picks=picks,  return_freqs=True, fmin=1, fmax=25)

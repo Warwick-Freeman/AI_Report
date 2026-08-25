@@ -13,6 +13,9 @@ import numpy as np
 from scipy.integrate import simpson
 import RepairArtifacts as repair
 from pymatreader import read_mat
+import profusion
+import artifacts
+from studylist import REQUIRED_CHANNELS
 import re
 
 mne.viz.set_browser_backend('qt')
@@ -75,10 +78,22 @@ class eegProcess:
                  epoch_length=4,  removeEpochsRationThreshold=0.3, 
                  dropEpochSD=2.2, tmax=None, tmin=None,
                  renameChannels=True,
-                 unit_uV=True):
+                 unit_uV=True,
+                 profusionSegment='longest', profusionMaxSeconds=None,
+                 classifyArtifacts=True):
         self.unit_uV = unit_uV
+        self.classifyArtifacts = classifyArtifacts
+        self.artifacts = None
+        self.sourceChannels = None
+        self.loadedSeconds = None
+        self.sourceSampleRate = None
+        self.epochsTotal = None
+        self.epochsIdentifiedBad = None
+        self.rejectionApplied = None
         self.eegFile = eegFile
         self.isFifFile = '.fif' in eegFile
+        self.profusionSegment = profusionSegment
+        self.profusionMaxSeconds = profusionMaxSeconds
         self.epoch_length = epoch_length
         self.removeEpochsRationThreshold=removeEpochsRationThreshold
         self.useRepair=useRepair
@@ -95,7 +110,16 @@ class eegProcess:
         events = []
         eegFullName = self.eegFullName
 
-        if self.isFifFile:
+        # native ProfusionEEG study - checked first, since a study is a folder
+        # rather than a file and its path would otherwise fall through to the
+        # EDF reader
+        if profusion.isProfusionStudy(eegFullName):
+            raw, events = profusion.readProfusionRaw(
+                eegFullName,
+                segmentMode=self.profusionSegment,
+                maxSeconds=self.profusionMaxSeconds)
+
+        elif self.isFifFile:
             raw = mne.io.read_raw_fif(eegFullName, preload=True, verbose=False)
             annot = raw.annotations
             # print (len(annot))
@@ -161,7 +185,9 @@ class eegProcess:
             print ('crop raw data from %s to %s' % (tmin, tmax))
         # print ('events: ', events)        
         chnsToDrop = ['EKG', 'Photic', 'A1', 'A2']
-        chnsMustHave = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'C3', 'C4', 'Cz', 'Fz', 'Pz', 'T3', 'T4']
+        # defined in studylist.py so the study browser can flag a study whose
+        # montage is short of these before running anything
+        chnsMustHave = list(REQUIRED_CHANNELS)
         
         # rename alternative channels to 10-20 system
         alternatChIn10_10=['T7', 'T8', 'P7', 'P8', 'POz']
@@ -188,7 +214,25 @@ class eegProcess:
         for i in range(len(alternatChIn10_10)):
             if alternatChIn10_10[i] in raw.ch_names and not mappedChIn10_20[i] in raw.ch_names:
                 raw.rename_channels({alternatChIn10_10[i]: mappedChIn10_20[i]})
-                
+
+        # Classify artifact types here and nowhere later: the names are already
+        # standardised, but the recording still has its native sample rate, no
+        # 1-60 Hz filter, and its ECG and polygraphic channels. Several artifacts
+        # SCORE asks for are invisible after that - sweat lives below 0.5 Hz,
+        # mains sits above the resampled Nyquist, and ECG needs the ECG channel.
+        # Recorded here for the same reason: after this point the montage has
+        # been cut to the 10-20 subset and the signal resampled, so neither the
+        # channels as acquired nor the loaded duration is recoverable.
+        self.sourceChannels = list(raw.ch_names)
+        self.loadedSeconds = raw.n_times / float(raw.info['sfreq'])
+        self.sourceSampleRate = float(raw.info['sfreq'])
+
+        if self.classifyArtifacts:
+            try:
+                self.artifacts = artifacts.classifyArtifacts(raw)
+            except Exception as e:
+                print('Artifact classification failed: %s' % e)
+                self.artifacts = None
 
         for ch in chnsToDrop:
             if ch in raw.ch_names:
@@ -349,6 +393,15 @@ class eegProcess:
         # decimal 2
         badRatio=round(badRatio, 2)
         print ('badRatio: ', badRatio)
+
+        # Record what actually happened, not what badRatio implies. Rejection is
+        # skipped below when it would leave 3 or fewer epochs, in which case
+        # badRatio still reports the epochs identified as bad even though none
+        # were removed - so the two numbers can disagree, and the report has to
+        # say which is which.
+        self.epochsTotal = totalEpochs
+        self.epochsIdentifiedBad = len(bad_epochs)
+        self.rejectionApplied = totalEpochs - len(bad_epochs) > 3
 
         if totalEpochs-len(bad_epochs)>3:
 

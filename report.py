@@ -17,7 +17,9 @@ from dotenv import load_dotenv
 def main():
     parser = argparse.ArgumentParser(description='create report automatically')
     # filename
-    parser.add_argument('edf_file', type=str, help='edf filename')    
+    parser.add_argument('edf_file', type=str,
+                        help='EEG input: an .edf/.fif/.mat file, or a native '
+                             'ProfusionEEG study folder (*.eeg)')
     parser.add_argument('--pdf', action='store_true', help='output pdf')
     parser.add_argument('--ai', action='store_true', help='output ai')
     parser.add_argument('--lang', type=str, help='report language')
@@ -26,14 +28,25 @@ def main():
     parser.add_argument('--llm', type=str, help='llm model')
     # TUH eeg
     parser.add_argument('--tuh', type=bool, help='tuh eeg')
+    # native ProfusionEEG studies only
+    parser.add_argument('--segment', type=str, default='longest',
+                        choices=['longest', 'concat'],
+                        help='ProfusionEEG study only: read the longest gap-free '
+                             'data segment (default), or concatenate all of them')
+    parser.add_argument('--max-seconds', dest='max_seconds', type=float,
+                        help='ProfusionEEG study only: cap how much signal to load')
+    parser.add_argument('--auto-eye-state', dest='auto_eye_state', action='store_true',
+                        help='infer eyes-open/eyes-closed from the signal where the '
+                             'recording has no eye-state annotations, so PDR '
+                             'reactivity can be scored. Unconfirmed: it can report '
+                             'a reduced reactivity that is not there')
 
     args = parser.parse_args()
-    if '/' in args.edf_file:
-        edf_filename = args.edf_file.split('/')[-1]
-        edf_path = '/'.join(args.edf_file.split('/')[:-1])
-    else:
-        edf_filename = args.edf_file.split('\\')[-1]
-        edf_path = '\\'.join(args.edf_file.split('\\')[:-1])
+    # os.path.split handles both separators, and a ProfusionEEG study folder
+    # given with a trailing separator
+    edf_path, edf_filename = os.path.split(args.edf_file.rstrip('/\\'))
+    if not edf_path:
+        edf_path = '.'
 
     outputPdf = args.pdf
     aiReport = args.ai
@@ -72,7 +85,9 @@ def main():
 
         CreateReport(edf_filename,edf_path, outputPdf=outputPdf, LLM_API_KEY=LLM_API_KEY,
                     llm_model=llm_model, unit_uV= not tuh_eeg,
-            aiReport=aiReport, reportLang=reportLang,dest_pdfPath=output_folder)
+            aiReport=aiReport, reportLang=reportLang,dest_pdfPath=output_folder,
+            profusionSegment=args.segment, profusionMaxSeconds=args.max_seconds,
+            autoEyeState=args.auto_eye_state)
     except Exception as e:
         print(e)
     

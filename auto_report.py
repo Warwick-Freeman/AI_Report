@@ -48,6 +48,9 @@ import markdown
 from bs4 import BeautifulSoup
 import time
 from createPDF import writePDF
+import pdr as pdrScore
+import profusion
+import recording
 import re
 import prompt as pmt
 
@@ -71,8 +74,10 @@ class CreateReport:
                  model_folder='./models/',
                  model_names=['CNN', 'GoogleNet','ResNet'], useRepair=True, unit_uV=True,
                  removeEpochsRationThreshold=0.3, dropEpochSD=2.2,
-                 tmax=None, tmin=None, renameChannels=True 
-                ): 
+                 tmax=None, tmin=None, renameChannels=True,
+                 profusionSegment='longest', profusionMaxSeconds=None,
+                 patientDob=None, patientAge=None, autoEyeState=False
+                ):
         self.benchmark = {
             'DBS': 0, # DBS
             'FSlow': 0, # focal slow        
@@ -102,8 +107,22 @@ class CreateReport:
         self.tmax=tmax
         self.tmin=tmin
         self.renameChannels=renameChannels
-        
-        if os.path.isfile(self.eegFullName):            
+        self.profusionSegment=profusionSegment
+        self.profusionMaxSeconds=profusionMaxSeconds
+        # SCORE scores the significance of the PDR, whose normal lower limit is
+        # age-dependent. patientDob wins over patientAge; both may be omitted,
+        # in which case the age is read from the study and, failing that,
+        # significance goes unscored rather than assuming an adult.
+        self.patientDob=patientDob
+        self.patientAge=patientAge
+        # Infer eyes-open/eyes-closed periods from the signal where the
+        # recording carries no eye-state annotations. Off by default: on a
+        # continuously eyes-closed recording it has been seen to split the
+        # record and report a reduced reactivity that is not there.
+        self.autoEyeState=autoEyeState
+
+        # a native ProfusionEEG study is a folder, not a single file
+        if os.path.isfile(self.eegFullName) or os.path.isdir(self.eegFullName):
             print ('File exists: ', self.eegFullName)
             if autogenerate:
                 raw, _=self.process()
@@ -121,12 +140,15 @@ class CreateReport:
     def getMeanAmplitudes(self,epochs):
         bandNames=['alpha', 'beta', 'theta', 'delta']
         bandFreqs=[[8, 13], [13, 30], [4, 8], [1, 4]]
-        epochs_crop=epochs.copy().crop(tmax=0.5)
+        # Measured over the whole epoch. This used to crop to 0.5 s first, which
+        # is shorter than the band-pass filters then applied (a 1-4 Hz filter is
+        # ~413 samples against 63 of signal), so the reported amplitudes were
+        # filter ringing - alpha came out near 190 uV on normal recordings.
         results={}
         for i in range(4):
             band=bandNames[i]
             low, high=bandFreqs[i]
-            band_epo=epochs_crop.copy().filter(low, high, verbose=False)
+            band_epo=epochs.copy().filter(low, high, verbose=False)
             data=band_epo.get_data(units='uV')
             amp=np.max(data, axis=2)-np.min(data, axis=2)
             # TOP 2% quantile
@@ -298,16 +320,115 @@ class CreateReport:
                         break
         return followOrder
 
+    def resolveAgeYears(self):
+        """Age at recording, from the caller or from the study's own files.
+
+        Returns (age, source). An explicit date of birth is preferred because
+        the date in EEG4PatientInfo.xml is numeric with no day/month marker,
+        which matters for infants even though it rarely does for adults.
+        """
+        if self.patientAge is not None:
+            return float(self.patientAge), 'supplied age'
+
+        recordingDate = None
+        meta = profusion.readStudyMetadata(self.eegFullName)             if profusion.isProfusionStudy(self.eegFullName) else None
+        if meta:
+            recordingDate = meta.get('recording_date')
+
+        if self.patientDob is not None:
+            age = profusion.ageYearsAt(self.patientDob, recordingDate)
+            if age is not None:
+                return age, 'supplied date of birth'
+            return None, 'date of birth supplied but no recording date found'
+
+        info = profusion.readPatientInfo(self.eegFullName)             if profusion.isProfusionStudy(self.eegFullName) else None
+        if info and info.get('dob'):
+            age = profusion.ageYearsAt(info['dob'], recordingDate)
+            if age is not None:
+                source = 'study patient record'
+                if info.get('dob_ambiguous'):
+                    source += ' (date of birth %s read month-first - confirm)'                         % info['dob_raw']
+                return age, source
+        return None, 'no date of birth available'
+
+    def describeRecording(self, raw, epochs, bad_ratio, eegWork):
+        """SCORE's patient and recording-conditions sections, plus the duration
+        accounting every rate in the report depends on."""
+        age, ageSource = self.resolveAgeYears()
+
+        epochLength = getattr(eegWork, 'epoch_length', 4)
+        retained = len(epochs)
+        total = getattr(eegWork, 'epochsTotal', None) or retained
+
+        loaded = getattr(eegWork, 'loadedSeconds', None)
+        if loaded is None and raw is not None:
+            loaded = raw.n_times / float(raw.info['sfreq'])
+        meta = profusion.readStudyMetadata(self.eegFullName) \
+            if profusion.isProfusionStudy(self.eegFullName) else None
+
+        durations = recording.DurationAccount(
+            recordedSeconds=(meta or {}).get('study_length'),
+            loadedSeconds=loaded,
+            analysedSeconds=retained * epochLength,
+            epochLength=epochLength, epochsRetained=retained, epochsTotal=total)
+
+        # When rejection would have left too few epochs to analyse, the pipeline
+        # keeps them all. The drop ratio elsewhere in the report then describes
+        # epochs identified as bad rather than epochs removed, which is a
+        # material difference to anyone reading a rate.
+        if getattr(eegWork, 'rejectionApplied', None) is False:
+            durations.rejectionSkipped = (getattr(eegWork, 'epochsIdentifiedBad', 0),
+                                          total)
+
+        return recording.describeRecording(
+            self.eegFullName, raw=raw,
+            channels=getattr(eegWork, 'sourceChannels', None) or (raw.ch_names if raw is not None else None),
+            ageYears=age, ageSource=ageSource, durations=durations,
+            # the rate before the pipeline resampled, which is the rate the
+            # recording was actually acquired at
+            sourceSampleRate=getattr(eegWork, 'sourceSampleRate', None),
+            analysisSampleRate=raw.info['sfreq'] if raw is not None else None,
+            analysisFilter='1-60 Hz band pass, REST reference')
+
+    def scorePdr(self, raw, epochs, results, bad_ratio):
+        """Score the posterior dominant rhythm on all nine SCORE properties."""
+        age, ageSource = self.resolveAgeYears()
+        if age is None:
+            print('PDR: age unavailable (%s)' % ageSource)
+        else:
+            print('PDR: age %.1f years (%s)' % (age, ageSource))
+
+        modulators = []
+        if raw is not None and raw.annotations is not None:
+            modulators = sorted({d for d in raw.annotations.description if d})
+
+        scored = pdrScore.scorePdr(
+            epochs,
+            leftFrequency=results.get('left_backgroud_frequency'),
+            rightFrequency=results.get('right_backgroud_frequency'),
+            raw=raw, ageYears=age,
+            artifactRatio=None if bad_ratio is None else bad_ratio / 100.0,
+            modulators=modulators, autoEyeState=self.autoEyeState)
+        scored['age_source'] = ageSource
+        return scored
+
     def process(self):
-        eegWork=eegProcess(self.fileName, self.filePath, useRepair=self.useRepair, 
-                           dropEpochSD=self.dropEpochSD, unit_uV=self.unit_uV, 
-                           tmax=self.tmax, tmin=self.tmin, renameChannels=self.renameChannels)
+        eegWork=eegProcess(self.fileName, self.filePath, useRepair=self.useRepair,
+                           dropEpochSD=self.dropEpochSD, unit_uV=self.unit_uV,
+                           tmax=self.tmax, tmin=self.tmin, renameChannels=self.renameChannels,
+                           removeEpochsRationThreshold=self.removeEpochsRationThreshold,
+                           profusionSegment=self.profusionSegment,
+                           profusionMaxSeconds=self.profusionMaxSeconds)
         raw, events=eegWork.getRawData()
         sample_rate=int(raw.info['sfreq'])
         self.sample_rate=sample_rate
         epochs,bad_ratio, bad_channels=eegWork.extractAlphaEpochs()
         results, psds=self.getFeatures(epochs)
         self.alphaEpochs=epochs
+        results['pdr']=self.scorePdr(raw, epochs, results, bad_ratio)
+        # classified on the recording as loaded, inside eegProcess.getRawData
+        results['artifacts']=eegWork.artifacts
+        results['recording']=self.describeRecording(raw, epochs, bad_ratio, eegWork)
         rawData=raw.copy().get_data(units='uV')
         amplitude=self.getMeanAmplitudes(epochs)
         results['removeEpochsRatio']=bad_ratio
@@ -643,6 +764,14 @@ class CreateReport:
         
         finalResults['bg_active']=results['bg_active']
         finalResults['bg_amp']=results['bg_amp']
+
+        # SCORE-scored PDR, flattened to term strings for the report prompt
+        pdrResult=results.get('pdr')
+        if pdrResult:
+            finalResults['posteriorDominantRhythm']={
+                label: pdrResult[key]['term']
+                for key, label in pdrScore.PROPERTY_ORDER
+                if pdrResult.get(key) and pdrResult[key]['term']}
             
         self.finalResults=finalResults
         self.results=results
