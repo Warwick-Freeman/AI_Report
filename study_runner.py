@@ -45,6 +45,9 @@ DEFAULTS = {
     # annotations. Enables PDR reactivity scoring, at the risk of a false
     # reduced-reactivity finding - see pdr.py.
     'autoEyeState': False,
+    # Sleep staging and sleep graphoelements. 'usleep' or 'yasa'.
+    'stageSleep': True,
+    'sleepBackend': 'usleep',
 }
 
 
@@ -140,7 +143,9 @@ def run(options):
                  profusionMaxSeconds=options['profusionMaxSeconds'],
                  patientDob=parseDob(options['patientDob']),
                  patientAge=options['patientAge'],
-                 autoEyeState=options['autoEyeState'])
+                 autoEyeState=options['autoEyeState'],
+                 stageSleep=options['stageSleep'],
+                 sleepBackend=options['sleepBackend'])
 
     if options['outputPdf']:
         pdf = expectedPdfPath(options)

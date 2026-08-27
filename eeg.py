@@ -15,6 +15,7 @@ import RepairArtifacts as repair
 from pymatreader import read_mat
 import profusion
 import artifacts
+import sleepstage
 from studylist import REQUIRED_CHANNELS
 import re
 
@@ -80,7 +81,7 @@ class eegProcess:
                  renameChannels=True,
                  unit_uV=True,
                  profusionSegment='longest', profusionMaxSeconds=None,
-                 classifyArtifacts=True):
+                 classifyArtifacts=True, stageSleep=True, sleepBackend='usleep'):
         self.unit_uV = unit_uV
         self.classifyArtifacts = classifyArtifacts
         self.artifacts = None
@@ -90,6 +91,9 @@ class eegProcess:
         self.epochsTotal = None
         self.epochsIdentifiedBad = None
         self.rejectionApplied = None
+        self.stageSleep = stageSleep
+        self.sleepBackend = sleepBackend
+        self.sleep = None
         self.eegFile = eegFile
         self.isFifFile = '.fif' in eegFile
         self.profusionSegment = profusionSegment
@@ -233,6 +237,17 @@ class eegProcess:
             except Exception as e:
                 print('Artifact classification failed: %s' % e)
                 self.artifacts = None
+
+        # Sleep staging belongs here too, and for the same reason: U-Sleep wants
+        # a central derivation against the contralateral mastoid, and A1/A2 are
+        # about to be dropped. It also wants the native sample rate rather than
+        # the 125 Hz the analysis resamples to.
+        if self.stageSleep:
+            try:
+                self.sleep = sleepstage.scoreSleep(raw, backend=self.sleepBackend)
+            except Exception as e:
+                print('Sleep staging failed: %s' % e)
+                self.sleep = None
 
         for ch in chnsToDrop:
             if ch in raw.ch_names:

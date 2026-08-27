@@ -99,3 +99,98 @@ def validatePrompt(text):
     """.format(text)
     
     return prompt
+
+############################################
+# SCORE conclusion: diagnostic significance, summary of findings and clinical
+# comments (SCORE sections 15 and 17).
+#
+# Two things make this different from reportPrompt above, and both come from
+# SCORE rather than from taste:
+#
+#   Diagnostic significance is a FORCED CHOICE from a fixed list, not prose. The
+#   model picks terms; it does not invent them, and score_common.validateSignificance
+#   rejects anything outside the list before a reader ever sees it.
+#
+#   It is also the step SCORE reserves for the electroencephalographer, taken
+#   last and in the clinical context. So what is produced here is a proposal for
+#   confirmation, never a scored value, and the report says so.
+#
+# The summary of findings and clinical comments are genuinely free text in
+# SCORE, which is exactly what a language model should be drafting - from the
+# structured findings and nothing else.
+############################################
+
+def scoreConclusionPrompt(finalResults, categories, supportable, unsupportable,
+                          reportLang='English'):
+    """Prompt for a SCORE-shaped conclusion, returned as JSON.
+
+    finalResults  : the structured findings, as a dict
+    categories    : SCORE's three significance categories
+    supportable   : the diagnostic yields this analysis can justify
+    unsupportable : {term: why it cannot be proposed here}
+    """
+    forbidden = '\n'.join('              - "%s" - %s' % (term, reason)
+                           for term, reason in sorted(unsupportable.items()))
+
+    return """You are a clinical neurophysiologist completing an EEG report using SCORE
+(Standardized Computer-based Organized Reporting of EEG, Beniczky et al.,
+Clinical Neurophysiology 2017).
+
+These are the structured findings extracted from the recording. They are the
+ONLY evidence you have. There is no clinical history, no referral question, and
+no imaging.
+
+STRUCTURED FINDINGS (JSON):
+{findings}
+
+Produce three things.
+
+1. DIAGNOSTIC SIGNIFICANCE (SCORE section 15)
+   Choose exactly one category from this list, copied verbatim:
+{categoryList}
+
+   If, and only if, you chose "Abnormal recording", also choose one or more
+   diagnostic yields from this list, copied verbatim:
+{yieldList}
+
+   You MUST NOT propose any of the following, whatever the findings suggest,
+   because the analysis you are given cannot support them:
+{forbidden}
+
+   For every term you choose, cite the specific findings it rests on. Do not
+   cite a finding that is not in the JSON above.
+
+2. SUMMARY OF FINDINGS (SCORE section 17)
+   A short paragraph, in professional clinical language, describing what was
+   found. Restate only what is in the JSON.
+
+3. CLINICAL COMMENTS (SCORE section 17)
+   A short paragraph on what the findings may mean and what, if anything, would
+   help next. Where the findings are non-specific, say so. Do not speculate
+   about a diagnosis.
+
+RULES
+- Never state a number, frequency, amplitude, duration or percentage that does
+  not appear in the JSON. Do not convert or re-band values that are already
+  banded.
+- Where a property is "Not possible to determine", say it was not assessable.
+  Do not guess it.
+- Where a finding is marked provisional, describe it as unconfirmed.
+- Write sections 2 and 3 in {language}. Keep the SCORE terms in section 1 in
+  English exactly as listed, since they are database codes.
+
+Reply with JSON only, no commentary, in exactly this shape:
+
+{{
+  "category": "<one category, verbatim>",
+  "yields": ["<zero or more yields, verbatim>"],
+  "basis": ["<finding supporting the choice>", "..."],
+  "confidence": "<high|medium|low>",
+  "summary_of_findings": "<paragraph>",
+  "clinical_comments": "<paragraph>"
+}}
+""".format(findings=finalResults,
+           categoryList='\n'.join('              - "%s"' % c for c in categories),
+           yieldList='\n'.join('              - "%s"' % y for y in supportable),
+           forbidden=forbidden,
+           language=reportLang)

@@ -51,6 +51,8 @@ from createPDF import writePDF
 import pdr as pdrScore
 import profusion
 import recording
+import score_common as sc
+import json
 import re
 import prompt as pmt
 
@@ -60,6 +62,19 @@ import anthropic
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+def printConclusion(conclusion):
+    """Log the proposed conclusion."""
+    print('--- Diagnostic significance (SCORE) - PROPOSED, needs confirmation ---')
+    print('  %-22s %s' % ('Category:', conclusion.get('category') or '(none proposed)'))
+    for y in conclusion.get('yields') or []:
+        print('  %-22s %s' % ('Yield:', y))
+    for b in conclusion.get('basis') or []:
+        print('  %-22s %s' % ('Basis:', b))
+    print('  %-22s %s' % ('Confidence:', conclusion.get('confidence')))
+    for note in conclusion.get('notes') or []:
+        print('  NOTE: %s' % note)
+
 
 class CreateReport:
     benchmark = {
@@ -76,7 +91,8 @@ class CreateReport:
                  removeEpochsRationThreshold=0.3, dropEpochSD=2.2,
                  tmax=None, tmin=None, renameChannels=True,
                  profusionSegment='longest', profusionMaxSeconds=None,
-                 patientDob=None, patientAge=None, autoEyeState=False
+                 patientDob=None, patientAge=None, autoEyeState=False,
+                 stageSleep=True, sleepBackend='usleep'
                 ):
         self.benchmark = {
             'DBS': 0, # DBS
@@ -120,6 +136,8 @@ class CreateReport:
         # continuously eyes-closed recording it has been seen to split the
         # record and report a reduced reactivity that is not there.
         self.autoEyeState=autoEyeState
+        self.stageSleep=stageSleep
+        self.sleepBackend=sleepBackend
 
         # a native ProfusionEEG study is a folder, not a single file
         if os.path.isfile(self.eegFullName) or os.path.isdir(self.eegFullName):
@@ -418,7 +436,9 @@ class CreateReport:
                            tmax=self.tmax, tmin=self.tmin, renameChannels=self.renameChannels,
                            removeEpochsRationThreshold=self.removeEpochsRationThreshold,
                            profusionSegment=self.profusionSegment,
-                           profusionMaxSeconds=self.profusionMaxSeconds)
+                           profusionMaxSeconds=self.profusionMaxSeconds,
+                           stageSleep=self.stageSleep,
+                           sleepBackend=self.sleepBackend)
         raw, events=eegWork.getRawData()
         sample_rate=int(raw.info['sfreq'])
         self.sample_rate=sample_rate
@@ -428,6 +448,7 @@ class CreateReport:
         results['pdr']=self.scorePdr(raw, epochs, results, bad_ratio)
         # classified on the recording as loaded, inside eegProcess.getRawData
         results['artifacts']=eegWork.artifacts
+        results['sleep']=eegWork.sleep
         results['recording']=self.describeRecording(raw, epochs, bad_ratio, eegWork)
         rawData=raw.copy().get_data(units='uV')
         amplitude=self.getMeanAmplitudes(epochs)
@@ -441,6 +462,10 @@ class CreateReport:
             ai_report_text=None
             if self.aiReport:          
                 ai_report_text=self.AI_Text_generate()
+                try:
+                    results['conclusion']=self.scoreConclusion()
+                except Exception as e:
+                    print('Conclusion generation failed: %s' % e)
             writePDF(self.fileName, rawData, epochs, psds, results,self.dest_pdfPath, sample_rate, raw.ch_names, ai_report_text)
 
         return raw, results
@@ -772,11 +797,102 @@ class CreateReport:
                 label: pdrResult[key]['term']
                 for key, label in pdrScore.PROPERTY_ORDER
                 if pdrResult.get(key) and pdrResult[key]['term']}
+
+        # The artifact and sleep folders too, so the conclusion is drawn from
+        # everything that was scored rather than the background alone.
+        artifactResult=results.get('artifacts')
+        if artifactResult and artifactResult.get('findings'):
+            finalResults['artifacts']=[
+                {'type': f['name'], 'location': f['location']['text'],
+                 'timing': f.get('prevalence') or f.get('incidence') or '',
+                 'confidence': f.get('confidence')}
+                for f in artifactResult['findings']]
+
+        sleepResult=results.get('sleep')
+        if sleepResult and sleepResult.get('term'):
+            finalResults['sleep']={
+                'finding': sleepResult['term'],
+                'stagesAchieved': sleepResult.get('stages_achieved') or [],
+                'graphoelements': [
+                    g['name'] + (' (unconfirmed)' if g.get('provisional') else '')
+                    for g in (sleepResult.get('graphoelements') or [])]}
+            if sleepResult.get('short_recording'):
+                finalResults['sleep']['caveat']=(
+                    'too few epochs to characterise sleep')
             
         self.finalResults=finalResults
         self.results=results
         return finalResults
     
+    def scoreConclusion(self, reportLang=None):
+        """Diagnostic significance, summary of findings and clinical comments.
+
+        SCORE makes the diagnostic significance a forced choice from a fixed
+        list and reserves it for the electroencephalographer, taken last and in
+        the clinical context. So this produces a PROPOSAL from that list, marked
+        for confirmation, never a scored value - and anything the model returns
+        that is outside the list, or beyond what this analysis can support, is
+        rejected here rather than shown to a reader.
+        """
+        if not self.finalResults:
+            self.genFinalResults()
+        reportLang = reportLang or self.reportLang or 'English'
+
+        message = pmt.scoreConclusionPrompt(
+            self.finalResults, sc.SIGNIFICANCE_CATEGORIES, sc.SUPPORTABLE_YIELDS,
+            sc.UNSUPPORTABLE_REASON, reportLang)
+
+        raw = self.AI_generate(message)
+        parsed, parseNote = self._parseConclusion(raw)
+        if parsed is None:
+            return {'status': 'unparsed', 'raw': raw, 'notes': [parseNote],
+                    'requires_confirmation': True}
+
+        category, accepted, rejected = sc.validateSignificance(
+            parsed.get('category'), parsed.get('yields'))
+
+        notes = []
+        if parsed.get('category') and category is None:
+            notes.append('The model returned "%s", which is not one of SCORE\'s '
+                         'three categories, so no category is proposed.'
+                         % parsed.get('category'))
+        for term, reason in rejected:
+            notes.append('Rejected the proposed yield "%s": %s.' % (term, reason))
+        if category == 'Abnormal recording' and not accepted:
+            notes.append('Abnormal was proposed with no supportable diagnostic '
+                         'yield, so the yield is left for the reader.')
+
+        conclusion = {
+            'status': 'proposed',
+            'category': category,
+            'yields': accepted,
+            'basis': [b for b in (parsed.get('basis') or []) if b],
+            'confidence': parsed.get('confidence'),
+            'summary_of_findings': (parsed.get('summary_of_findings') or '').strip(),
+            'clinical_comments': (parsed.get('clinical_comments') or '').strip(),
+            'language': reportLang,
+            'model': self.llm_model,
+            'requires_confirmation': True,
+            'notes': notes,
+        }
+        printConclusion(conclusion)
+        return conclusion
+
+    @staticmethod
+    def _parseConclusion(raw):
+        """Pull the JSON object out of the model's reply."""
+        if not raw:
+            return None, 'The model returned nothing.'
+        text = raw.strip()
+        # Models commonly wrap JSON in a fenced block or add a sentence first.
+        start, end = text.find('{'), text.rfind('}')
+        if start < 0 or end <= start:
+            return None, 'No JSON object in the reply; the raw text is kept below.'
+        try:
+            return json.loads(text[start:end + 1]), None
+        except ValueError as e:
+            return None, 'The reply was not valid JSON (%s); the raw text is kept below.' % e
+
     def AI_generate(self, message, token=None):
         model_name=self.llm_model
 

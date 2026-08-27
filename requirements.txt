@@ -34,6 +34,11 @@ markdown
 beautifulsoup4
 fpdf2
 
+# Sleep staging and sleep graphoelements (sleepstage.py). YASA is BSD-3 and
+# brings its own model weights; U-Sleep's checkpoints are not on PyPI and are
+# taken from a SLEEPYLAND checkout - see the readme.
+yasa
+
 # ProfusionEEG study-list database (_CMPStudyList.mdb) for study_browser.py.
 # Also needs the 64-bit Microsoft Access ODBC driver installed on the machine.
 pyodbc

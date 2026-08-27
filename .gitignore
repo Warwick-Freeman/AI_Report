@@ -13,3 +13,7 @@ ProfusionEEGSDK/PythonSDK/cmpeeg/cmpeeg/cmpeeg/x64/
 
 # junction tree used as PYTHON312_64_ROOT when rebuilding cmpeeg
 /.py312root
+
+# U-Sleep checkpoints: MIT-licensed via SLEEPYLAND, but trained on NSRR data
+# whose Data Use Agreement has not been reviewed for redistribution. Kept local.
+/models/usleep

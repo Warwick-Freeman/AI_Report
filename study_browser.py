@@ -262,6 +262,27 @@ class StudyBrowser(QMainWindow):
         self.autoEyeWarning = QLabel()
         self.autoEyeWarning.setWordWrap(True)
         signalForm.addRow('', self.autoEyeWarning)
+
+        self.sleepCheck = QCheckBox('Stage sleep and detect spindles')
+        self.sleepCheck.setChecked(True)
+        self.sleepCheck.setToolTip(
+            "Fills SCORE's Sleep and drowsiness folder: which stages were "
+            "reached, time to first sleep, and sleep spindles.\n\n"
+            "Both backends were trained on overnight polysomnography, so a "
+            "routine EEG - short, mostly awake, no EOG - is off distribution. "
+            "Useful for answering whether sleep was reached; treat individual "
+            "epochs, and REM especially, with caution.")
+        signalForm.addRow('', self.sleepCheck)
+
+        self.sleepBackendCombo = QComboBox()
+        self.sleepBackendCombo.addItems(['usleep', 'yasa'])
+        self.sleepBackendCombo.setToolTip(
+            "usleep: U-Sleep, a convolutional network. Verified at 86.5% "
+            "agreement with an expert hypnogram on an 11-hour reference PSG.\n"
+            "yasa: YASA's gradient-boosted stager - lighter, and the fallback "
+            "when no U-Sleep checkpoint is installed.\n\n"
+            "Spindle and slow-wave detection always comes from YASA.")
+        signalForm.addRow('Sleep stager', self.sleepBackendCombo)
         grid.addLayout(signalForm, 0, 1)
 
         # -- artifact handling ---------------------------------------------
@@ -463,6 +484,8 @@ class StudyBrowser(QMainWindow):
             'tmin': self._optionalFloat(self.tminEdit, 'Analyse from'),
             'tmax': self._optionalFloat(self.tmaxEdit, 'Analyse to'),
             'autoEyeState': self.autoEyeCheck.isChecked(),
+            'stageSleep': self.sleepCheck.isChecked(),
+            'sleepBackend': self.sleepBackendCombo.currentText(),
             'useRepair': self.repairCheck.isChecked(),
             'dropEpochSD': self.dropSdSpin.value(),
             'removeEpochsRationThreshold': self.badRatioSpin.value(),
@@ -478,6 +501,8 @@ class StudyBrowser(QMainWindow):
                            ('segment', self.segmentCombo.currentText()),
                            ('maxSeconds', self.maxSecondsEdit.text()),
                            ('autoEye', self.autoEyeCheck.isChecked()),
+                           ('sleep', self.sleepCheck.isChecked()),
+                           ('sleepBackend', self.sleepBackendCombo.currentText()),
                            ('tmin', self.tminEdit.text()),
                            ('tmax', self.tmaxEdit.text()),
                            ('repair', self.repairCheck.isChecked()),
@@ -496,6 +521,8 @@ class StudyBrowser(QMainWindow):
         self.segmentCombo.setCurrentText(s.value('opt/segment', 'longest', type=str))
         self.maxSecondsEdit.setText(s.value('opt/maxSeconds', '', type=str))
         self.autoEyeCheck.setChecked(s.value('opt/autoEye', False, type=bool))
+        self.sleepCheck.setChecked(s.value('opt/sleep', True, type=bool))
+        self.sleepBackendCombo.setCurrentText(s.value('opt/sleepBackend', 'usleep', type=str))
         self.tminEdit.setText(s.value('opt/tmin', '', type=str))
         self.tmaxEdit.setText(s.value('opt/tmax', '', type=str))
         self.repairCheck.setChecked(s.value('opt/repair', True, type=bool))

@@ -103,16 +103,10 @@ class writePDF:
         pdf.cell(196, line_height, text='Power Spectrum Topomap', ln=1, align='C')
         # pdf.set_font(fontName, size=12)
         # pdf.cell(196, line_height-3, text=self.fileName, ln=1, align='C' )
-        jpgFile = self.dest_folder+'eeg0.jpg'
-        pdf.image(jpgFile, x=0, w=196)
-        
-        # 左右channel差異
-        jpgFile=self.dest_folder+'eeg1.jpg'
-        pdf.image(jpgFile, x=0, w=196)       
-        
-        # O1, O2 主頻率
-        jpgFile=self.dest_folder+'eeg2.jpg'
-        pdf.image(jpgFile, x=0, w=196)
+        # Three figures stacked: give each what is left after the ones above it,
+        # so the last one shrinks rather than running off the page.
+        for figure in ('eeg0.jpg', 'eeg1.jpg', 'eeg2.jpg'):
+            self._placeImage(pdf, self.dest_folder + figure)
 
         
         # The structured findings are the substance of the report, so they are
@@ -283,28 +277,29 @@ class writePDF:
         pdf.add_page(orientation = 'L')
         # set page horizontal    
         # eeg5.jpg
-        pdf.cell(280, line_height, text='EEG, 4s/epochs', ln=0, align='C')
-        jpgFile = self.dest_folder+'eeg5.jpg'
-        pdf.image(jpgFile, x=10, y=20, w=280)
-        
+        pdf.cell(0, line_height, text='EEG, 4s/epochs', ln=1, align='C')
+        # A square figure at full landscape width would be 280 mm tall on a
+        # 210 mm page, so it has to be fitted to the height as well.
+        self._placeImage(pdf, self.dest_folder + 'eeg5.jpg', top=20)
+
         # 第二頁
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
-        pdf.cell(200, 20, text='Topography and Power Spectrum', ln=0, align='C')
-        jpgFile=self.dest_folder+'eeg3.jpg'
-        pdf.image(jpgFile, w=200, x=10, y=25)
+        pdf.cell(0, 20, text='Topography and Power Spectrum', ln=1, align='C')
+        self._placeImage(pdf, self.dest_folder + 'eeg3.jpg', top=25)
 
         # 第三頁
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
-        pdf.cell(200, 20, text='Spectrogram', ln=0, align='C')
-        jpgFile=self.dest_folder+'eeg4.jpg'
-        pdf.image(jpgFile, w=200, x=10, y=25)
+        pdf.cell(0, 20, text='Spectrogram', ln=1, align='C')
+        self._placeImage(pdf, self.dest_folder + 'eeg4.jpg', top=25)
         self.writePdrPage(pdf, fontName, line_height, results.get('pdr'))
+        self.writeSleepPage(pdf, fontName, line_height, results.get('sleep'))
         self.writeArtifactPage(pdf, fontName, line_height, results.get('artifacts'))
-        self.writeAiPage(pdf, fontName, line_height)
+        self.writeConclusionPage(pdf, fontName, line_height, results.get('conclusion'))
+        self.writeAiPage(pdf, fontName, line_height, results.get('conclusion'))
 
         outFile=self.dest_folder+self.fileName.split('.')[0]+'.pdf'
         pdf.output(outFile)
@@ -393,9 +388,158 @@ class writePDF:
                 pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
                 pdf.set_x(pdf.l_margin)
 
-    def writeAiPage(self, pdf, fontName, line_height):
-        """The LLM narrative, as a closing summary of the structured findings."""
+    def writeConclusionPage(self, pdf, fontName, line_height, conclusion):
+        """SCORE sections 15 and 17: diagnostic significance, summary, comments.
+
+        The significance is rendered as a proposal awaiting confirmation, and
+        never as a scored value. SCORE makes it the mandatory last step for the
+        electroencephalographer, taken in the clinical context - which is
+        precisely what an automated analysis does not have.
+        """
+        if not conclusion:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Diagnostic Significance', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='SCORE sections 15 and 17 - proposed from the structured '
+                      'findings, for confirmation', ln=1, align='C')
+        pdf.ln(3)
+
+        # A banner, because the single most important thing about this page is
+        # that nothing on it has been signed.
+        pdf.set_fill_color(246, 237, 220)
+        pdf.set_draw_color(140, 90, 15)
+        pdf.set_text_color(120, 75, 10)
+        pdf.set_font(fontName, size=10)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(196, line_height - 2, border=1, fill=True, align='L',
+                       text='  NOT A SCORED CONCLUSION. Diagnostic significance is '
+                            'the electroencephalographer\'s, taken last and in the '
+                            'clinical context. The proposal below is drawn only from '
+                            'the structured findings in this report - there is no '
+                            'clinical history, referral question or imaging behind '
+                            'it. Confirm, amend or replace it before signing.')
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.ln(3)
+
+        if conclusion.get('status') == 'unparsed':
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height, text='Proposal could not be read', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in conclusion.get('notes') or []:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+            raw = (conclusion.get('raw') or '').strip()
+            if raw:
+                pdf.ln(1)
+                pdf.multi_cell(196, line_height - 3, text=raw[:3000], align='L')
+                pdf.set_x(pdf.l_margin)
+            return
+
+        widths = (52, 124, 20)
+        rowHeight = line_height - 1
+        pdf.set_font(fontName, size=9)
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Property', 'Proposed term', 'Confidence'), widths)),
+                  rowHeight, fill=True)
+
+        category = conclusion.get('category') or '(none proposed - reader to score)'
+        if category.startswith('Abnormal'):
+            pdf.set_text_color(170, 0, 0)
+        self._row(pdf, (('Significance', widths[0]), (category, widths[1]),
+                        (conclusion.get('confidence') or '', widths[2])), rowHeight)
+        pdf.set_text_color(0, 0, 0)
+
+        yields = conclusion.get('yields') or []
+        if yields:
+            for y in yields:
+                self._row(pdf, (('Diagnostic yield', widths[0]), (y, widths[1]),
+                                ('', widths[2])), rowHeight)
+                if pdf.get_string_width(y) > widths[1] - 2.5:
+                    self._subLine(pdf, fontName, y, widths[0], line_height - 3.5)
+                    pdf.set_font(fontName, size=9)
+        elif category.startswith('Abnormal'):
+            self._row(pdf, (('Diagnostic yield', widths[0]),
+                            ('(none supportable - reader to score)', widths[1]),
+                            ('', widths[2])), rowHeight)
+
+        basis = conclusion.get('basis') or []
+        if basis:
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Based on', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for item in basis:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + str(item), align='L')
+                pdf.set_x(pdf.l_margin)
+
+        for title, key in (('Summary of findings', 'summary_of_findings'),
+                           ('Clinical comments', 'clinical_comments')):
+            body = (conclusion.get(key) or '').strip()
+            if not body:
+                continue
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text=title, ln=1, align='L')
+            pdf.set_font(fontName, size=10)
+            pdf.multi_cell(196, line_height - 2, text=body, align='L')
+            pdf.set_x(pdf.l_margin)
+
+        notes = conclusion.get('notes') or []
+        if notes:
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
+        # Somewhere for the reader to actually take it over.
+        pdf.ln(4)
+        pdf.set_font(fontName, size=11)
+        pdf.cell(196, line_height - 1, text='For completion by the reader', ln=1,
+                 align='L')
+        pdf.set_font(fontName, size=10)
+        for label in ('Diagnostic significance as scored',
+                      'Clinical correlation', 'Electroencephalographer', 'Date'):
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(60, line_height, text='   ' + label, border=0, align='L')
+            pdf.cell(136, line_height, text='', border='B', align='L')
+            pdf.ln(line_height)
+        pdf.set_font(fontName, size=8)
+        pdf.set_text_color(105, 105, 105)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(196, line_height - 3.5, align='L',
+                       text='Drafted by %s. Sections 2 and 3 are free text under '
+                            'SCORE and were written from the structured findings '
+                            'only; the significance terms above are SCORE database '
+                            'codes and are reproduced verbatim.'
+                            % (conclusion.get('model') or 'a language model'))
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
+
+    def writeAiPage(self, pdf, fontName, line_height, conclusion=None):
+        """The free-text LLM narrative from the original pipeline.
+
+        Suppressed once a SCORE conclusion has been produced. The two overlap
+        almost entirely, and a report carrying two independently generated
+        conclusions can carry two different ones. The SCORE page is the
+        constrained version - its terms come from a fixed list and it is
+        forbidden from stating numbers absent from the findings, which this
+        narrative is not: it has been observed inventing an amplitude range.
+        Kept as the fallback for when the conclusion could not be parsed.
+        """
         if not self.ai_report_text:
+            return
+        if conclusion and conclusion.get('status') == 'proposed':
+            print('AI narrative page suppressed - the SCORE conclusion page '
+                  'supersedes it')
             return
         pdf.add_page()
         pdf.set_font(fontName, size=18)
@@ -494,6 +638,108 @@ class writePDF:
                 pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
                 pdf.set_x(pdf.l_margin)
 
+    def writeSleepPage(self, pdf, fontName, line_height, sleep):
+        """SCORE's Sleep and drowsiness folder."""
+        if not sleep:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Sleep and Drowsiness', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Scored against SCORE (Beniczky et al., Clin Neurophysiol 2017), '
+                      'section 7 - staged by %s' % (sleep.get('backend') or '?'),
+                 ln=1, align='C')
+        pdf.ln(3)
+
+        pdf.set_font(fontName, size=11)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(58, line_height - 1.5, text='   Finding', align='L')
+        pdf.multi_cell(138, line_height - 1.5, text=str(sleep.get('term') or ''), align='L')
+        pdf.set_x(pdf.l_margin)
+        if sleep.get('stages_achieved'):
+            pdf.cell(58, line_height - 1.5, text='   Stages achieved', align='L')
+            pdf.multi_cell(138, line_height - 1.5,
+                           text=', '.join(sleep['stages_achieved']), align='L')
+            pdf.set_x(pdf.l_margin)
+        if sleep.get('derivation'):
+            pdf.cell(58, line_height - 1.5, text='   Staged from', align='L')
+            pdf.multi_cell(138, line_height - 1.5, text=str(sleep['derivation']), align='L')
+            pdf.set_x(pdf.l_margin)
+        pdf.ln(2)
+
+        stats = sleep.get('statistics') or {}
+        if 'sleep_onset_minutes' in stats:
+            pdf.set_font(fontName, size=10)
+            pdf.cell(196, line_height - 1.5,
+                     text='   Time to first non-wake epoch: %.1f min'
+                          % stats['sleep_onset_minutes'], ln=1, align='L')
+
+        # Hypnogram summary: minutes and share per stage.
+        widths = (34, 40, 40, 82)
+        rowHeight = line_height - 1
+        pdf.set_font(fontName, size=9)
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Stage', 'Epochs', 'Minutes', 'Share of recording'),
+                                widths)), rowHeight, fill=True)
+        import sleepstage
+        for stage in sleepstage.USLEEP_STAGES:
+            s = stats.get(stage)
+            if not s or not s.get('epochs'):
+                continue
+            self._row(pdf, ((stage, widths[0]), (str(s['epochs']), widths[1]),
+                            ('%.1f' % s['minutes'], widths[2]),
+                            ('%.1f%%' % s['percent'], widths[3])), rowHeight)
+        pdf.ln(3)
+
+        grapho = sleep.get('graphoelements') or []
+        pdf.set_font(fontName, size=11)
+        pdf.cell(196, line_height - 1, text='Sleep graphoelements', ln=1, align='L')
+        if not grapho:
+            pdf.set_font(fontName, size=10)
+            pdf.cell(196, line_height - 1.5,
+                     text='   None detected.', ln=1, align='L')
+        else:
+            widths = (52, 60, 64, 20)
+            pdf.set_font(fontName, size=9)
+            pdf.set_fill_color(232, 234, 240)
+            self._row(pdf, list(zip(('Graphoelement', 'Location', 'Incidence',
+                                     'Confidence'), widths)), rowHeight, fill=True)
+            for f in grapho:
+                name = f['name'] + (' *' if f.get('provisional') else '')
+                incidence = f.get('incidence') or ''
+                if f.get('count'):
+                    incidence = '%s (%d)' % (incidence, f['count'])
+                self._row(pdf, ((name, widths[0]), (f['location']['text'], widths[1]),
+                                (incidence, widths[2]),
+                                (f.get('confidence', ''), widths[3])), rowHeight)
+                self._subLine(pdf, fontName, f.get('basis'), widths[0], line_height - 3.5)
+                pdf.set_font(fontName, size=9)
+
+        if sleep.get('undetected'):
+            pdf.ln(2)
+            pdf.set_font(fontName, size=9)
+            pdf.set_text_color(105, 105, 105)
+            pdf.multi_cell(196, line_height - 3.5, align='L',
+                           text='Not detected, and left for the reader: %s. Sleep '
+                                'architecture (normal or abnormal), and the significance '
+                                'of any absent or asymmetric graphoelement, are scored '
+                                'separately by SCORE and are clinical judgements.'
+                                % ', '.join(sleep['undetected']))
+            pdf.set_x(pdf.l_margin)
+            pdf.set_text_color(0, 0, 0)
+
+        notes = sleep.get('notes') or []
+        if notes:
+            pdf.ln(1)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
     def writeArtifactPage(self, pdf, fontName, line_height, artifactResult):
         """A page for the artifact types found, in SCORE's vocabulary.
 
@@ -574,6 +820,52 @@ class writePDF:
     # just drew, so anything written afterwards starts at the page margin unless
     # x is put back. Every table below goes through these two helpers so that
     # cannot be got wrong one row at a time.
+
+    def _placeImage(self, pdf, jpgFile, maxWidth=None, maxHeight=None, top=None,
+                    gap=2.0, bottomMargin=8.0):
+        """Draw a figure scaled to fit the space available, aspect preserved.
+
+        fpdf2's image() honours whichever of width or height it is given and
+        derives the other from the aspect ratio, so passing only a width lets a
+        tall figure run straight off the bottom of the page. That is what
+        happened to the EEG traces: a square 2400x2400 figure drawn 280 mm wide
+        became 280 mm tall on a landscape page with 190 mm of usable height.
+
+        Returns the height consumed, so a page stacking several figures can pass
+        the remaining space to the next one.
+        """
+        if not os.path.exists(jpgFile):
+            print('Figure missing, skipped: %s' % jpgFile)
+            return 0.0
+        try:
+            from PIL import Image
+            with Image.open(jpgFile) as img:
+                pixelWidth, pixelHeight = img.size
+            aspect = pixelHeight / float(pixelWidth)
+        except Exception as e:
+            print('Could not measure %s (%s); drawing at width only' % (jpgFile, e))
+            pdf.image(jpgFile, x=pdf.l_margin, w=maxWidth or 190)
+            return 0.0
+
+        usableWidth = pdf.w - pdf.l_margin - pdf.r_margin
+        if top is None:
+            top = pdf.get_y()
+        maxWidth = usableWidth if maxWidth is None else min(maxWidth, usableWidth)
+        available = pdf.h - bottomMargin - top
+        maxHeight = available if maxHeight is None else min(maxHeight, available)
+        if maxWidth <= 0 or maxHeight <= 0:
+            return 0.0
+
+        width = maxWidth
+        height = width * aspect
+        if height > maxHeight:
+            height = maxHeight
+            width = height / aspect
+        # Centre whatever is left over horizontally.
+        x = pdf.l_margin + (usableWidth - width) / 2.0
+        pdf.image(jpgFile, x=x, y=top, w=width, h=height)
+        pdf.set_y(top + height + gap)
+        return height
 
     @staticmethod
     def _fit(pdf, text, width, padding=2.5):

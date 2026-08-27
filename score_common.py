@@ -117,6 +117,77 @@ INCIDENCE_BANDS = (
 )
 
 
+# --------------------------------------------------- diagnostic significance
+# SCORE section 15 and Table 17. This is a forced-choice list: the report's
+# conclusion is picked from these terms, never written freehand.
+
+SIGNIFICANCE_CATEGORIES = ('Normal recording', 'Abnormal recording',
+                           'No definite abnormality')
+
+# Diagnostic yield, for an abnormal recording (Table 17).
+SIGNIFICANCE_YIELDS = (
+    'Epilepsy',
+    'Status epilepticus',
+    'Continuous spikes and waves during slow sleep (CSWS) or electrical status '
+    'epilepticus in sleep (ESES)',
+    'Psychogenic non-epileptic seizures (PNES)',
+    'Other non-epileptic clinical episode',
+    'Focal dysfunction of the central nervous system',
+    'Diffuse dysfunction of the central nervous system',
+    'Coma',
+    'Brain death',
+    'EEG abnormality of uncertain clinical significance',
+)
+
+# What this pipeline can actually support. It analyses background, artifacts and
+# sleep; it has no epileptiform detection, no episode capture and no clinical
+# context, so the yields that rest on those cannot be proposed from it however
+# suggestive the background looks. Anything outside this set is rejected rather
+# than passed to the reader, because a conclusion of "epilepsy" carries
+# consequences that a background analysis cannot justify.
+SUPPORTABLE_YIELDS = (
+    'Focal dysfunction of the central nervous system',
+    'Diffuse dysfunction of the central nervous system',
+    'EEG abnormality of uncertain clinical significance',
+)
+
+UNSUPPORTABLE_REASON = {
+    'Epilepsy': 'needs epileptiform findings, which this analysis does not detect',
+    'Status epilepticus': 'needs ictal pattern detection, which is not implemented',
+    'Continuous spikes and waves during slow sleep (CSWS) or electrical status '
+    'epilepticus in sleep (ESES)': 'needs spike-wave quantification in sleep',
+    'Psychogenic non-epileptic seizures (PNES)': 'needs recorded episodes and clinical correlation',
+    'Other non-epileptic clinical episode': 'needs recorded episodes',
+    'Coma': 'needs the clinical state, which the signal alone does not give',
+    'Brain death': 'needs a dedicated protocol and clinical criteria',
+}
+
+
+def validateSignificance(category, yields):
+    """Check a proposed conclusion against SCORE's vocabulary.
+
+    Returns (category, accepted, rejected) where rejected lists (term, reason)
+    for anything outside SCORE's list or beyond what this analysis supports.
+    Silently dropping them would be worse than saying why.
+    """
+    if category not in SIGNIFICANCE_CATEGORIES:
+        category = None
+
+    accepted, rejected = [], []
+    for term in (yields or []):
+        term = (term or '').strip()
+        if not term:
+            continue
+        if term in SUPPORTABLE_YIELDS:
+            accepted.append(term)
+        elif term in SIGNIFICANCE_YIELDS:
+            rejected.append((term, UNSUPPORTABLE_REASON.get(
+                term, 'not supportable from background analysis alone')))
+        else:
+            rejected.append((term, 'not a SCORE diagnostic-significance term'))
+    return category, accepted, rejected
+
+
 def prevalenceBand(coveredSeconds, analysedSeconds):
     """SCORE prevalence band for a pattern covering part of the recording.
 

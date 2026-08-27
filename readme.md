@@ -98,6 +98,111 @@ rate, and the denominator must be the duration actually examined. A pipeline tha
 discards half its epochs and then divides by the recording length halves every
 rate it reports.
 
+### Diagnostic significance, summary and clinical comments
+
+`prompt.scoreConclusionPrompt` plus `CreateReport.scoreConclusion` fill SCORE
+sections 15 and 17, and the PDF gains a **Diagnostic Significance** page. Requires
+`--ai`.
+
+SCORE treats these two sections very differently, and so does this:
+
+- **Diagnostic significance is a forced choice** from a fixed list, not prose. The
+  model picks terms; `score_common.validateSignificance` then rejects anything
+  outside SCORE's list before a reader sees it, and says why it was rejected.
+- **Summary of findings and clinical comments are genuinely free text** in SCORE,
+  which is what a language model should be drafting - from the structured findings
+  and nothing else.
+
+**It is a proposal, never a scored value.** SCORE reserves the diagnostic
+significance for the electroencephalographer, taken last and in the clinical
+context - which an automated analysis does not have. The page carries a banner
+saying so and a sign-off block for the reader to score it themselves.
+
+**Yields this analysis cannot support are refused.** Epilepsy, status epilepticus,
+CSWS/ESES, PNES, other non-epileptic episode, coma and brain death are rejected
+whatever the findings suggest, because there is no epileptiform detection, no
+episode capture and no clinical context behind them. Only focal dysfunction,
+diffuse dysfunction and abnormality of uncertain significance can be proposed. A
+conclusion of "epilepsy" from a background analysis carries consequences the
+analysis cannot justify.
+
+The prompt also forbids stating any number, band or percentage absent from the
+findings, requires "not assessable" where a property was Not possible to
+determine, and requires provisional findings to be described as unconfirmed. That
+rule exists because the earlier free-text narrative was observed inventing an
+amplitude range of "10 to 50 uV", which is neither SCORE's banding nor in the data.
+
+Once a conclusion parses, the original free-text **EEG AI Analysis** page is
+suppressed: the two overlap almost entirely, and a report carrying two
+independently generated conclusions can carry two different ones. The narrative
+remains as the fallback when the conclusion cannot be parsed.
+
+### Report figures
+
+Figures are scaled to fit the page box in both dimensions, centred, via
+`writePDF._placeImage`. fpdf2 derives the missing dimension from the aspect
+ratio, so passing only a width lets a tall figure run off the bottom - the EEG
+traces page was a square figure drawn 280 mm wide on a 210 mm-tall landscape
+page, and the spectrogram overflowed by about 28 mm. Pass a width only if the
+height is genuinely unconstrained.
+
+### Sleep staging and sleep graphoelements
+
+`sleepstage.py` fills SCORE's *Sleep and drowsiness* folder (section 7) — which
+stages were reached, time to the first non-wake epoch, per-stage timings, and sleep
+spindles — and the PDF gains a **Sleep and Drowsiness** page.
+
+Two backends, answering different questions:
+
+| Backend | Role |
+| --- | --- |
+| **U-Sleep** | Staging. Fully convolutional network (Perslev et al.), using the published NSRR checkpoints that ship with [SLEEPYLAND](https://github.com/biomedical-signal-processing/sleepyland) |
+| **YASA** | Graphoelements — spindles and slow waves — plus a fallback stager |
+
+**Verified:** the U-Sleep integration scores **86.5% agreement with an expert
+hypnogram** across 1364 epochs of an 11-hour reference PSG, at or above U-Sleep's
+published level. Per-stage recall: N2 96.6%, REM 92.0%, W 83.2%, N1 50.5%. YASA's
+spindle detector was validated by injection — 0 false positives on a recording with
+no sigma peak, ~85% recall of 30 injected 13 Hz spindles, recovering 13.0 Hz.
+
+Staging runs at the same point as artifact classification, before the pipeline
+resamples and drops channels, because U-Sleep wants a central derivation against the
+contralateral mastoid (**C4-A2** / **C3-A1**) at the native sample rate — and A1/A2
+are about to be dropped. Where no mastoid exists it falls back to a bare central
+electrode and says so, since that is off-distribution for the model.
+
+Set `stageSleep=False` to skip it, or `sleepBackend='yasa'`. In the study browser:
+**Stage sleep and detect spindles**, with a **Sleep stager** dropdown.
+
+#### Caveats that matter
+
+Both backends were built for overnight polysomnography. A routine EEG is 20–30
+minutes of a mostly awake patient with no EOG and no chin EMG, so this is applied
+out of distribution — fine for answering SCORE's question (was sleep reached, which
+stages), but individual epochs, and REM especially, deserve caution. Recordings
+under 5 minutes are reported with an explicit warning rather than at face value,
+because U-Sleep evaluates them inside a 35-epoch window padded with zeros.
+
+K-complexes are reported **provisionally**: they come from YASA's slow-wave detector
+restricted to staged N2/N3, which is a proxy rather than a K-complex detector. Vertex
+waves, saw-tooth waves, POSTS and hypnagogic hypersynchrony are not detected and are
+listed as outstanding for the reader.
+
+#### Getting the checkpoints
+
+`sleepstage.py` looks for a U-Sleep `.h5` in, in order: `$USLEEP_MODEL_DIR`,
+`models/usleep/`, then `$SLEEPYLAND_DIR/usleepyland/model/`. The architecture is
+vendored at [vendor/usleep_model.py](vendor/usleep_model.py) — kept as a faithful
+copy of uSLEEPYLAND's `utime/models/usleep.py` because the checkpoints are
+weights-only, so the architecture must match exactly.
+
+**Licensing, unresolved:** SLEEPYLAND and uSLEEPYLAND are MIT (© 2024 Luigi
+Fiorillo), and the U-Sleep architecture is Perslev et al. But the checkpoints are
+trained on NSRR data, whose Data Use Agreement has not been reviewed for
+redistribution in a commercial product. `models/usleep/` is therefore gitignored —
+resolve that before shipping anything that bundles these weights. YASA carries no
+such question: BSD-3, on PyPI, with its own weights.
+
 ### Artifact types, scored against SCORE
 
 `artifacts.py` names the artifact types present using SCORE's vocabulary
