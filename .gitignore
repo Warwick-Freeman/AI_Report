@@ -17,3 +17,11 @@ ProfusionEEGSDK/PythonSDK/cmpeeg/cmpeeg/cmpeeg/x64/
 # U-Sleep checkpoints: MIT-licensed via SLEEPYLAND, but trained on NSRR data
 # whose Data Use Agreement has not been reviewed for redistribution. Kept local.
 /models/usleep
+
+# ProfusionEEG SDK: Compumedics proprietary source, COM DLLs and demo studies
+# (which carry a patient record). Located by path or CMPEEG_PYD_DIR at runtime,
+# so it does not need to be in the repository.
+/ProfusionEEGSDK
+
+# Reference paper, redistributed under CC BY-NC-ND by its publisher
+/*.pdf
