@@ -51,6 +51,8 @@ from createPDF import writePDF
 import pdr as pdrScore
 import profusion
 import recording
+import interictal
+import spikeseizure
 import score_common as sc
 import json
 import re
@@ -62,6 +64,58 @@ import anthropic
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+# EDF+ headers carry a date-of-birth field, but exporters routinely blank it with
+# a sentinel rather than leaving it empty. 1899-12-30 is the OLE/Delphi zero date
+# and is what the sample recordings here all carry. Taking such a value at face
+# value yields an age of about 125 years, which lands on the adult plateau of the
+# PDR age table and therefore looks right - while being silently wrong on any
+# child recorded by the same exporter. So the sentinels are rejected by name, and
+# anything outside a plausible human age is rejected as well.
+EDF_PLACEHOLDER_BIRTHDAYS = {(1899, 12, 30), (1900, 1, 1), (1970, 1, 1),
+                             (1, 1, 1), (1904, 1, 1)}
+PLAUSIBLE_AGE_YEARS = (0.0, 120.0)
+
+
+def ageFromRecordingHeader(raw):
+    """Age at recording from the file's own header, or (None, reason).
+
+    Works for any format MNE fills subject_info for, which in practice means
+    EDF+. Returns (ageYears, description).
+    """
+    if raw is None:
+        return None, None
+    info = (raw.info.get('subject_info') or {})
+    birthday = info.get('birthday')
+    measured = raw.info.get('meas_date')
+    if birthday is None:
+        return None, None
+    if measured is None:
+        return None, 'the recording header has a date of birth but no recording date'
+
+    # MNE returns a date, or a (year, month, day) tuple on older versions.
+    if isinstance(birthday, (tuple, list)) and len(birthday) == 3:
+        parts = tuple(int(v) for v in birthday)
+    else:
+        parts = (birthday.year, birthday.month, birthday.day)
+
+    if parts in EDF_PLACEHOLDER_BIRTHDAYS:
+        return None, ('the recording header carries %04d-%02d-%02d as the date of '
+                      'birth, which is a placeholder written by the exporter '
+                      'rather than a real date' % parts)
+
+    from datetime import datetime
+    try:
+        born = datetime(*parts)
+    except ValueError:
+        return None, 'the date of birth in the recording header is not a valid date'
+    recorded = datetime(measured.year, measured.month, measured.day)
+    age = (recorded - born).days / 365.2425
+    if not PLAUSIBLE_AGE_YEARS[0] <= age <= PLAUSIBLE_AGE_YEARS[1]:
+        return None, ('the recording header implies an age of %.0f years, which is '
+                      'not plausible, so it was not used' % age)
+    return age, 'the recording header'
+
 
 def printConclusion(conclusion):
     """Log the proposed conclusion."""
@@ -92,7 +146,8 @@ class CreateReport:
                  tmax=None, tmin=None, renameChannels=True,
                  profusionSegment='longest', profusionMaxSeconds=None,
                  patientDob=None, patientAge=None, autoEyeState=False,
-                 stageSleep=True, sleepBackend='usleep'
+                 stageSleep=True, sleepBackend='usleep', spikeDetections=None,
+                 spikeTypeIds=None
                 ):
         self.benchmark = {
             'DBS': 0, # DBS
@@ -138,6 +193,13 @@ class CreateReport:
         self.autoEyeState=autoEyeState
         self.stageSleep=stageSleep
         self.sleepBackend=sleepBackend
+        # Detections from the cleared spike/seizure detector, when a caller has
+        # them. Nothing in this project produces them.
+        self.spikeDetections=spikeDetections
+        # {'spike': [ids], 'seizure': [ids]} - the detector's own EventTypeID
+        # values, once known. Selecting events by type id is the reliable way to
+        # tell a detection from a technologist's note; see spikeseizure.py.
+        self.spikeTypeIds=spikeTypeIds
 
         # a native ProfusionEEG study is a folder, not a single file
         if os.path.isfile(self.eegFullName) or os.path.isdir(self.eegFullName):
@@ -338,7 +400,7 @@ class CreateReport:
                         break
         return followOrder
 
-    def resolveAgeYears(self):
+    def resolveAgeYears(self, raw=None):
         """Age at recording, from the caller or from the study's own files.
 
         Returns (age, source). An explicit date of birth is preferred because
@@ -367,12 +429,20 @@ class CreateReport:
                 if info.get('dob_ambiguous'):
                     source += ' (date of birth %s read month-first - confirm)'                         % info['dob_raw']
                 return age, source
+
+        # Finally the recording's own header, which EDF+ carries.
+        age, description = ageFromRecordingHeader(raw)
+        if age is not None:
+            return age, description
+        if description:
+            return None, description
+
         return None, 'no date of birth available'
 
     def describeRecording(self, raw, epochs, bad_ratio, eegWork):
         """SCORE's patient and recording-conditions sections, plus the duration
         accounting every rate in the report depends on."""
-        age, ageSource = self.resolveAgeYears()
+        age, ageSource = self.resolveAgeYears(raw)
 
         epochLength = getattr(eegWork, 'epoch_length', 4)
         retained = len(epochs)
@@ -408,9 +478,68 @@ class CreateReport:
             analysisSampleRate=raw.info['sfreq'] if raw is not None else None,
             analysisFilter='1-60 Hz band pass, REST reference')
 
+    def scoreDetections(self, raw, epochs, eegWork):
+        """Score spike and seizure detections, if a detector supplied any.
+
+        Detections reach this from one of two places, neither of which this
+        project owns:
+
+          the cleared SpikeAndSeizure detector, once CEventDetection is
+          available as an extension - it hands back EventStruct records with
+          per-channel detections;
+
+          a study that has already been through the detector inside
+          ProfusionEEG, whose detections sit in the study's event database.
+          Events are selected by TYPE there, never by their text - the text is
+          whatever the person at the keyboard typed.
+
+        With neither present this returns an empty result and the report simply
+        has no epileptiform findings - which is the honest outcome, since
+        nothing in this pipeline detects them.
+        """
+        detections = list(self.spikeDetections or [])
+        source = 'supplied directly' if detections else None
+
+        # The study's own event database, which is where the detector leaves its
+        # detections when it runs during acquisition. Preferred over everything
+        # else: the detector ran inside ProfusionEEG in its own configuration,
+        # and this only reads the result.
+        if not detections and profusion.isProfusionStudy(self.eegFullName):
+            fromStudy = spikeseizure.detectionsFromStudy(
+                self.eegFullName, typeIds=self.spikeTypeIds, verbose=True)
+            if fromStudy:
+                detections = fromStudy
+                source = "the study's event database"
+
+        if not detections and raw is not None and raw.annotations is not None:
+            # Events carried across from a ProfusionEEG study by profusion.py.
+            fromStudy = spikeseizure.detectionsFromAnnotations(raw.annotations)
+            if fromStudy:
+                detections = fromStudy
+                source = 'events stored in the study by the detector'
+
+        if not detections:
+            return None
+
+        # The denominator is the duration the DETECTOR examined, which is the
+        # whole loaded recording - not the epoch-screened duration the background
+        # analysis kept. Those differ by about half on this data, and using the
+        # smaller one inflates every incidence band the detections produce.
+        examined = getattr(eegWork, 'loadedSeconds', None)
+        if not examined and raw is not None:
+            examined = raw.n_times / float(raw.info['sfreq'])
+        print('Spike/seizure detections: %d (%s), over %.0f s examined'
+              % (len(detections), source, examined or 0))
+        result = spikeseizure.scoreSpikesAndSeizures(
+            detections, analysedSeconds=examined,
+            sampleRate=getattr(eegWork, 'sourceSampleRate', None))
+        result['source'] = source
+        result['examined_seconds'] = None if examined is None else round(examined, 1)
+        return result
+
     def scorePdr(self, raw, epochs, results, bad_ratio):
         """Score the posterior dominant rhythm on all nine SCORE properties."""
-        age, ageSource = self.resolveAgeYears()
+        age, ageSource = self.resolveAgeYears(raw)
         if age is None:
             print('PDR: age unavailable (%s)' % ageSource)
         else:
@@ -445,15 +574,40 @@ class CreateReport:
         epochs,bad_ratio, bad_channels=eegWork.extractAlphaEpochs()
         results, psds=self.getFeatures(epochs)
         self.alphaEpochs=epochs
+        results['bad_channels']=bad_channels
         results['pdr']=self.scorePdr(raw, epochs, results, bad_ratio)
         # classified on the recording as loaded, inside eegProcess.getRawData
         results['artifacts']=eegWork.artifacts
         results['sleep']=eegWork.sleep
         results['recording']=self.describeRecording(raw, epochs, bad_ratio, eegWork)
+
+        # The focal slowing, diffuse slowing and band ratios computed above are
+        # interictal findings in SCORE's vocabulary; scored here so they land in
+        # a folder instead of standing beside the report as percentages.
+        results['interictal']=interictal.scoreInterictal(
+            epochs, results, epochLength=getattr(eegWork, 'epoch_length', 4))
+
+        # Spike and seizure detections, where a detector has supplied any. The
+        # findings merge onto the interictal page; seizures get their own.
+        results['spikeseizure']=self.scoreDetections(raw, epochs, eegWork)
+        spikeFindings=(results['spikeseizure'] or {}).get('interictal') or []
+        if spikeFindings and results.get('interictal'):
+            results['interictal'].setdefault('findings', []).extend(spikeFindings)
+            results['interictal'].setdefault('notes', []).extend(
+                (results['spikeseizure'] or {}).get('notes') or [])
+
+        # The bad-electrode list belongs in the artifact folder, with a location.
+        badFinding=interictal.badElectrodeFinding(
+            bad_channels, len(epochs) * getattr(eegWork, 'epoch_length', 4),
+            threshold=self.removeEpochsRationThreshold)
+        if badFinding and results.get('artifacts'):
+            results['artifacts'].setdefault('findings', []).append(badFinding)
+        elif badFinding:
+            results['artifacts']={'findings': [badFinding], 'notes': [],
+                                  'analysed_seconds': None}
         rawData=raw.copy().get_data(units='uV')
         amplitude=self.getMeanAmplitudes(epochs)
         results['removeEpochsRatio']=bad_ratio
-        results['bad_channels']=bad_channels
         results['amplitudes']=amplitude
         self.results=results
         self.genFinalResults()
@@ -807,6 +961,13 @@ class CreateReport:
                  'timing': f.get('prevalence') or f.get('incidence') or '',
                  'confidence': f.get('confidence')}
                 for f in artifactResult['findings']]
+
+        interictalResult=results.get('interictal')
+        if interictalResult and interictalResult.get('findings'):
+            finalResults['interictalFindings']=[
+                {'name': f['name'], 'location': f['location']['text'],
+                 'prevalence': f.get('prevalence') or ''}
+                for f in interictalResult['findings']]
 
         sleepResult=results.get('sleep')
         if sleepResult and sleepResult.get('term'):

@@ -146,6 +146,131 @@ traces page was a square figure drawn 280 mm wide on a 210 mm-tall landscape
 page, and the spectrogram overflowed by about 28 mm. Pass a width only if the
 height is genuinely unconstrained.
 
+### Batch reporting
+
+`batch_report.py` generates a report for every recording in a folder, naming each
+PDF after its recording:
+
+```powershell
+.\.venv\Scripts\python.exe batch_report.py sample_data --jobs 2
+```
+
+`sample_dataRT.edf` becomes `reports\sample_dataRT.pdf`. Options mirror the
+single-run flags: `--ai`, `--llm`, `--segment`, `--max-seconds`, `--no-sleep`, and
+`--out` for a different output folder.
+
+Each recording runs as its own `study_runner.py` process, exactly as the study
+browser does, so one failure cannot take the batch with it and every run leaves an
+options file that reproduces it alone. Failures are collected into
+`batch_failures.log` with their full output rather than scrolling past. `--jobs`
+runs several at once - each loads its own TensorFlow and uses several cores, so
+2-3 is usually the most that helps.
+
+### Spike and seizure detections, scored against SCORE
+
+`spikeseizure.py` maps the Compumedics SpikeAndSeizure detector's output onto
+SCORE terms: spikes onto the **Interictal Findings** page as epileptiform
+interictal activity (section 8, Table 5), and electrographic seizures onto a new
+**Episodes** page (section 10, Table 9).
+
+The detector is not part of this project. Detections reach the mapper from either:
+
+- **`EventStruct` records** from the cleared detector, once `CEventDetection` is
+  available as an extension — carrying `vnDetections` (channel indices) and
+  `Spike.fValue` per channel, so both the location and its maximum are exact;
+- **a study already processed by the detector inside ProfusionEEG**, whose spike
+  events `cmpeeg` reads back. Their channel labels survive in the event text,
+  which is the only reason that route works at all.
+
+With neither present the report simply has no epileptiform findings, which is the
+honest outcome — nothing else in this pipeline detects them.
+
+Two properties of `EventStruct` bound what can be reported, and both are stated on
+the page:
+
+**Morphology is not inferred.** SCORE separates `Spike` from `Sharp-wave` and
+`Spike-and-slow-wave` by duration and shape. `nStart`/`nEnd` are *segment*
+boundaries — `EventDetection.cpp` derives `nStart` from `m_nStartSamplePage` plus a
+multiple of the half-segment length — so the detection duration says nothing about
+the graphoelement. The subtype is left for the reader.
+
+**A location maximum is only claimed when something discriminates.** Spike
+amplitudes decide it where the detector supplies them, otherwise how often each
+electrode was implicated — and where every electrode ties, no maximum is named at
+all rather than picking one arbitrarily.
+
+Incidence is banded over the duration the **detector** examined, which is the whole
+loaded recording, not the epoch-screened duration the background analysis keeps.
+Those differ by about half on the demo study, and using the smaller one inflates
+every band.
+
+Seizures are scored as electrographic only. Semiology, ILAE seizure type, the
+evolution of the ictal pattern and the clinical–EEG relationship all need the video
+and the clinical record, so the Episodes page lists them as outstanding — an
+episode detected electrographically is not by itself an epileptic seizure.
+
+### Interictal findings, scored against SCORE
+
+`interictal.py` converts the focal slowing, diffuse slowing and band ratios the
+pipeline has always computed into SCORE's *Interictal findings* folder
+(section 8, Table 5, abnormal interictal rhythmic activity), and the PDF gains an
+**Interictal Findings** page.
+
+| Existing analysis | SCORE term |
+| --- | --- |
+| Diffuse slowing / slow-wave ratio | `Delta activity` or `Theta activity`, diffuse |
+| Focal slowing / left-right asymmetry | `Delta activity` or `Theta activity`, lateralised |
+| Excess beta / beta ratio | `Beta activity`, diffuse |
+| Bad-electrode list | `Other artifact (electrode artifact)`, in the artifacts folder |
+
+The band ratios themselves are **not** findings - they are the measurement a
+finding rests on, so they are carried as its basis rather than reported as though
+a percentage were a diagnosis. They remain on the findings page unchanged.
+
+**Everything is computed per epoch and reported with a prevalence band.** The
+original analysis averaged the whole record into one number, which cannot
+distinguish intermittent slowing (usually functional) from continuous slowing
+(usually structural) - the distinction a reader acts on. On `Demo.eeg` the diffuse
+slowing scores `Continuous (>90%)`, the left-sided delta excess `Abundant (50-89%)`.
+
+**Focal findings must actually be lateralised.** Each side is scored as its own
+entry, as SCORE requires for a graphoelement seen independently in two locations,
+and a side is only reported if it is sustained (>=20% of epochs) and clearly
+dominates the other (1.5x). Without that test an asymmetry that flips between
+hemispheres epoch to epoch yields electrodes on both sides in one finding, which
+renders as "diffuse" - a restatement of the diffuse finding rather than a focal
+one. On the PhysioNet EDF, where the excess alternates at 53% versus 53%, nothing
+is reported and the reason is printed.
+
+**Mode of appearance** (SCORE Table 6: random, periodic, variable) is scored by
+comparing the intervals between occurrences against the intervals expected if the
+same number were scattered at random over the same epochs - a permutation test
+against each recording's own null. More regular than chance scores `Periodic`,
+less regular scores `Variable`, and anything between scores `Random`; a finding
+covering over 90% of epochs has no recurrence to characterise and scores
+continuous instead. The median interval is reported alongside, which SCORE records
+for periodic graphoelements.
+
+A fixed threshold cannot do this job. Simulation shows the interval coefficient of
+variation expected by chance runs from about 0.44 at 50% occurrence density to
+0.85 at 5%, so any constant would call dense random activity periodic and sparse
+regular activity random. The permutation test removes the constant, and 400
+placements at a fixed seed keep a report reproducible.
+
+Occurrences are grouped **on the clock, not by epoch index**. `extractAlphaEpochs`
+sorts epochs by their alpha anterior-posterior ratio and drops artifact epochs
+first, so epoch index is neither time order nor evenly spaced - two epochs adjacent
+by index can be minutes apart. The original onsets survive in the events array and
+every interval is measured from them.
+
+Epileptiform activity is not detected at all and remains entirely the reader's -
+these are rhythmic-activity abnormalities only.
+
+Thresholds are the pipeline's own existing criteria (0.5 asymmetry, the 60% slow
+and 30% beta benchmarks already printed on the findings page), so the clinical
+behaviour is unchanged - only the vocabulary it is reported in. They remain
+uncalibrated against expert scoring.
+
 ### Sleep staging and sleep graphoelements
 
 `sleepstage.py` fills SCORE's *Sleep and drowsiness* folder (section 7) — which
@@ -316,8 +441,16 @@ A folder of ProfusionEEG studies carries a `_CMPStudyList.mdb` index at its root
 `study_browser.py` reads it, lists the studies, and generates a report for the one
 you pick:
 
-```bash
-python study_browser.py "C:\Studies"
+```powershell
+.\Start-StudyBrowser.ps1 "C:\Studies"
+```
+
+`Start-StudyBrowser.ps1` uses the project's own virtual environment and resolves
+paths from its own location, so it works from any prompt and can be pinned to a
+shortcut. The folder argument is optional. Equivalent without the script:
+
+```powershell
+.\.venv\Scripts\python.exe study_browser.py "C:\Studies"
 ```
 
 The folder argument is optional — the browser remembers the last one used, and has a

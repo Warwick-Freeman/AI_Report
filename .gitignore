@@ -25,3 +25,8 @@ ProfusionEEGSDK/PythonSDK/cmpeeg/cmpeeg/cmpeeg/x64/
 
 # Reference paper, redistributed under CC BY-NC-ND by its publisher
 /*.pdf
+
+# Compumedics proprietary source. The spike/seizure detector and the event
+# detection library are cleared product code, not part of this project - it
+# reads their output from a study and never contains them.
+/ProfusionEEG-trunk-*/

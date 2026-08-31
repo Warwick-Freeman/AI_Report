@@ -188,6 +188,28 @@ def validateSignificance(category, yields):
     return category, accepted, rejected
 
 
+# SCORE Table 8's duration bands. Defined there for rhythmic and periodic
+# patterns, but they are the vocabulary SCORE uses for the duration of a timed
+# finding generally, so episodes are described with them too.
+DURATION_BANDS = (
+    (10.0, 'Very brief (<10 s)'),
+    (60.0, 'Brief (10-59 s)'),
+    (300.0, 'Intermediate (1-4.9 min)'),
+    (3600.0, 'Long (5-59 min)'),
+    (float('inf'), 'Very long (>1 h)'),
+)
+
+
+def durationBand(seconds):
+    """SCORE duration band for a finding of this length."""
+    if seconds is None or seconds < 0:
+        return None
+    for limit, label in DURATION_BANDS:
+        if seconds < limit:
+            return label
+    return DURATION_BANDS[-1][1]
+
+
 def prevalenceBand(coveredSeconds, analysedSeconds):
     """SCORE prevalence band for a pattern covering part of the recording.
 

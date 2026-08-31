@@ -296,6 +296,8 @@ class writePDF:
         pdf.cell(0, 20, text='Spectrogram', ln=1, align='C')
         self._placeImage(pdf, self.dest_folder + 'eeg4.jpg', top=25)
         self.writePdrPage(pdf, fontName, line_height, results.get('pdr'))
+        self.writeInterictalPage(pdf, fontName, line_height, results.get('interictal'))
+        self.writeEpisodesPage(pdf, fontName, line_height, (results.get('spikeseizure') or {}).get('episodes'))
         self.writeSleepPage(pdf, fontName, line_height, results.get('sleep'))
         self.writeArtifactPage(pdf, fontName, line_height, results.get('artifacts'))
         self.writeConclusionPage(pdf, fontName, line_height, results.get('conclusion'))
@@ -637,6 +639,182 @@ class writePDF:
             for note in notes:
                 pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
                 pdf.set_x(pdf.l_margin)
+
+    def writeInterictalPage(self, pdf, fontName, line_height, interictalResult):
+        """SCORE's Interictal findings folder - abnormal rhythmic activity.
+
+        The focal and diffuse slowing the pipeline has always computed, now with
+        a location and a prevalence band instead of a record-wide average, since
+        intermittent and continuous slowing mean different things.
+        """
+        if not interictalResult:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Interictal Findings', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Scored against SCORE (Beniczky et al., Clin Neurophysiol 2017), '
+                      'Table 5 - abnormal interictal rhythmic activity', ln=1, align='C')
+        pdf.ln(3)
+
+        findings = interictalResult.get('findings') or []
+        if not findings:
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height,
+                     text='No abnormal interictal rhythmic activity reported.',
+                     ln=1, align='L')
+        else:
+            widths = (34, 52, 44, 46, 20)
+            rowHeight = line_height - 1
+            pdf.set_font(fontName, size=9)
+            pdf.set_fill_color(232, 234, 240)
+            self._row(pdf, list(zip(('Activity', 'Location', 'Prevalence',
+                                     'Mode of appearance', 'Conf.'), widths)),
+                      rowHeight, fill=True)
+            for f in findings:
+                location = f['location']['text']
+                mode = f.get('mode_of_appearance') or ''
+                # Rhythmic activity is banded by prevalence, discrete
+                # discharges by incidence; show whichever the finding carries.
+                timing = f.get('prevalence') or f.get('incidence') or ''
+                if f.get('count'):
+                    timing = ('%s (%d)' % (timing, f['count'])) if timing else str(f['count'])
+                self._row(pdf, ((f['name'], widths[0]), (location, widths[1]),
+                                (timing, widths[2]),
+                                (mode, widths[3]),
+                                (f.get('confidence', ''), widths[4])), rowHeight)
+                # Location and the timing evidence in full underneath, since both
+                # are longer than any sensible column.
+                parts = []
+                if pdf.get_string_width(location) > widths[1] - 2.5:
+                    parts.append(location)
+                if f.get('discharge_pattern'):
+                    parts.append('Discharge pattern: %s' % f['discharge_pattern'])
+                if f.get('timing_basis'):
+                    parts.append(f['timing_basis'])
+                if f.get('basis'):
+                    parts.append(f['basis'])
+                self._subLine(pdf, fontName, '. '.join(parts), widths[0],
+                              line_height - 3.5)
+                pdf.set_font(fontName, size=9)
+
+        measures = interictalResult.get('measures') or {}
+        if measures:
+            pdf.ln(3)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Underlying measurements', ln=1,
+                     align='L')
+            pdf.set_font(fontName, size=9)
+            labels = [
+                ('epochs', 'Epochs analysed', '%s'),
+                ('analysed_seconds', 'Seconds analysed', '%s s'),
+                ('diffuse_slow_percent', 'Mean slow (1.5-8 Hz) fraction', '%s%%'),
+                ('beta_percent', 'Mean beta (13-30 Hz) fraction', '%s%%'),
+            ]
+            for key, label, fmt in labels:
+                if measures.get(key) is not None:
+                    pdf.cell(196, line_height - 2.5,
+                             text='   %s: %s' % (label, fmt % measures[key]),
+                             ln=1, align='L')
+
+        pdf.ln(2)
+        pdf.set_font(fontName, size=9)
+        pdf.set_text_color(105, 105, 105)
+        pdf.multi_cell(196, line_height - 3.5, align='L',
+                       text='Mode of appearance compares the intervals between '
+                            'occurrences with the intervals expected if the same number '
+                            'were scattered at random over the same epochs: more regular '
+                            'than chance is scored periodic, less regular is scored '
+                            'variable, and anything between is random. Occurrences are '
+                            'grouped on the clock rather than by epoch index, because '
+                            'discarded artifact epochs leave gaps. Epileptiform activity '
+                            'is not detected at all and remains entirely for the reader; '
+                            'the findings above are rhythmic-activity abnormalities only.')
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
+
+        notes = interictalResult.get('notes') or []
+        if notes:
+            pdf.ln(1)
+            pdf.set_font(fontName, size=11)
+            pdf.cell(196, line_height - 1, text='Notes', ln=1, align='L')
+            pdf.set_font(fontName, size=9)
+            for note in notes:
+                pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
+                pdf.set_x(pdf.l_margin)
+
+    def writeEpisodesPage(self, pdf, fontName, line_height, episodes):
+        """SCORE's Episodes folder - electrographic seizures only.
+
+        SCORE's episode template is built around the electro-clinical
+        correlation: semiology, three phases, evolution of the ictal pattern.
+        A detector supplies none of that, so what appears here is the
+        electrographic half and the rest is marked as the reader's.
+        """
+        if not episodes:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Episodes', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Scored against SCORE (Beniczky et al., Clin Neurophysiol 2017), '
+                      'section 10 - electrographic findings only', ln=1, align='C')
+        pdf.ln(3)
+
+        widths = (56, 52, 24, 44, 20)
+        rowHeight = line_height - 1
+        pdf.set_font(fontName, size=9)
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Episode', 'Location', 'Onset', 'Duration',
+                                 'Conf.'), widths)), rowHeight, fill=True)
+        for e in episodes:
+            onset = e.get('onset_seconds')
+            duration = e.get('duration_seconds')
+            self._row(pdf, ((e['name'], widths[0]),
+                            (e['location']['text'], widths[1]),
+                            ('' if onset is None else '%.0f s' % onset, widths[2]),
+                            (e.get('duration_band') or (
+                                '' if duration is None else '%.0f s' % duration),
+                             widths[3]),
+                            (e.get('confidence', ''), widths[4])), rowHeight)
+            detail = []
+            if duration is not None:
+                detail.append('duration %.0f s' % duration)
+            if e['location']['text'] and pdf.get_string_width(
+                    e['location']['text']) > widths[1] - 2.5:
+                detail.append(e['location']['text'])
+            if e.get('basis'):
+                detail.append(e['basis'])
+            self._subLine(pdf, fontName, '. '.join(detail), widths[0],
+                          line_height - 3.5)
+            pdf.set_font(fontName, size=9)
+
+        pdf.ln(3)
+        pdf.set_font(fontName, size=11)
+        pdf.cell(196, line_height - 1, text='For completion by the reader', ln=1,
+                 align='L')
+        pdf.set_font(fontName, size=10)
+        for field in ('Seizure type (ILAE classification)',
+                      'Semiology and its somatotopic modifiers',
+                      'Ictal EEG pattern and its evolution',
+                      'Clinical-EEG temporal relationship',
+                      'Consciousness and awareness',
+                      'Postictal findings'):
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(196, line_height - 1.5, text='   - ' + field, ln=1, align='L')
+        pdf.set_font(fontName, size=8)
+        pdf.set_text_color(105, 105, 105)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(196, line_height - 3.5, align='L',
+                       text='   These need the video and the clinical record, so they '
+                            'are left blank rather than assumed. An episode detected '
+                            'electrographically is not by itself an epileptic seizure.')
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(0, 0, 0)
 
     def writeSleepPage(self, pdf, fontName, line_height, sleep):
         """SCORE's Sleep and drowsiness folder."""
