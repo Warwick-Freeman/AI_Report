@@ -84,6 +84,45 @@ def _tableNames(cursor):
     return {t.table_name for t in cursor.tables(tableType='TABLE')}
 
 
+def _columnMap(cursor, table):
+    """{lowercase name: actual name} for a table's columns.
+
+    The event schema is not fixed across ProfusionEEG versions: Demo.eeg's
+    EEGEventString carries ShortText and FullText, while the 01RT..06MS studies
+    have FullText only. Access reports an unknown column as a missing query
+    parameter ("Too few parameters. Expected 1") rather than as a bad column
+    name, so a hardcoded SELECT fails obscurely on any schema but the one it was
+    written against. Every query below is built from what the study actually has.
+    """
+    return {c.column_name.lower(): c.column_name for c in cursor.columns(table=table)}
+
+
+def _pick(columns, *candidates):
+    """The first candidate column present, or None."""
+    for name in candidates:
+        actual = columns.get(name.lower())
+        if actual:
+            return actual
+    return None
+
+
+def _select(cursor, table, columns, names):
+    """Run a SELECT over the named columns, skipping any the table lacks.
+
+    Returns (rows, index) where index maps each requested name to its position
+    in a row, or None where the column does not exist.
+    """
+    present = [(n, columns[n.lower()]) for n in names if n.lower() in columns]
+    if not present:
+        return [], {n: None for n in names}
+    cursor.execute('SELECT %s FROM %s'
+                   % (', '.join('[%s]' % actual for _, actual in present), table))
+    index = {n: None for n in names}
+    for position, (name, _) in enumerate(present):
+        index[name] = position
+    return cursor.fetchall(), index
+
+
 def readEvents(studyPath, verbose=True):
     """Every event in a study, with its traces where the study records them.
 
@@ -114,45 +153,91 @@ def readEvents(studyPath, verbose=True):
                       'events file, not the study database.' % os.path.basename(path))
             return []
 
-        # Per-type and per-category labels, so an event carries a name and not
-        # just a numeric type.
-        labels = {}
+        # A type label, but only where one genuinely exists.
+        #
+        # EEGEventString is not a table of type names. Across all seven demo
+        # studies every row carries EventTypeID 1, because it is the pick-list of
+        # predefined annotation texts an operator can choose from - 'Eyes Open',
+        # 'Coughing', 'Swallow' - organised by category. Reading it as a type
+        # name gave every type-1 event in Demo.eeg the label 'Drowsy', which was
+        # simply the first row of that pick-list.
+        #
+        # So a label is taken only when a type id maps to exactly one distinct
+        # string. A pick-list is ambiguous by construction and yields nothing; a
+        # detector that names its own event type resolves to that one name. The
+        # rule needs no list of known versions and fails closed.
+        strings = {}
         if 'EEGEventString' in tables:
-            cursor.execute('SELECT EventTypeID, ShortText, FullText FROM EEGEventString')
-            for typeId, shortText, fullText in cursor.fetchall():
-                if typeId is not None and typeId not in labels:
-                    labels[typeId] = (shortText or fullText or '').strip()
+            columns = _columnMap(cursor, 'EEGEventString')
+            rows, at = _select(cursor, 'EEGEventString', columns,
+                               ('EventTypeID', 'ShortText', 'FullText'))
+            for row in rows:
+                typeId = row[at['EventTypeID']] if at['EventTypeID'] is not None else None
+                short = row[at['ShortText']] if at['ShortText'] is not None else None
+                full = row[at['FullText']] if at['FullText'] is not None else None
+                text = (short or full or '').strip()
+                if typeId is not None and text:
+                    strings.setdefault(typeId, set()).add(text)
+        labels = {typeId: next(iter(texts))
+                  for typeId, texts in strings.items() if len(texts) == 1}
+
         categories = {}
         if 'EEGEventCategory' in tables:
-            cursor.execute('SELECT EventCategoryID, Name FROM EEGEventCategory')
-            categories = {cid: (name or '').strip() for cid, name in cursor.fetchall()}
+            columns = _columnMap(cursor, 'EEGEventCategory')
+            rows, at = _select(cursor, 'EEGEventCategory', columns,
+                               ('EventCategoryID', 'Name'))
+            if at['EventCategoryID'] is not None and at['Name'] is not None:
+                categories = {r[at['EventCategoryID']]: (r[at['Name']] or '').strip()
+                              for r in rows}
 
         # The per-event trace association - the structural location source.
         traces, montages = {}, {}
         if 'EEGEventGraphs' in tables:
-            cursor.execute('SELECT EventID, TraceName, MontageName FROM EEGEventGraphs')
-            for eventId, traceName, montageName in cursor.fetchall():
+            columns = _columnMap(cursor, 'EEGEventGraphs')
+            rows, at = _select(cursor, 'EEGEventGraphs', columns,
+                               ('EventID', 'TraceName', 'MontageName'))
+            for row in rows:
+                if at['EventID'] is None:
+                    break
+                eventId = row[at['EventID']]
+                traceName = row[at['TraceName']] if at['TraceName'] is not None else None
+                montageName = row[at['MontageName']] if at['MontageName'] is not None else None
                 if traceName:
                     traces.setdefault(eventId, []).append(traceName.strip())
                 if montageName:
                     montages[eventId] = montageName.strip()
 
-        cursor.execute('''SELECT EventID, EventTypeID, StartSecondHi, StartSecondLo,
-                                 DurationHi, DurationLo, EventString, EventCategoryID,
-                                 IsEndEvent
-                          FROM EEGEvent''')
+        columns = _columnMap(cursor, 'EEGEvent')
+        wanted = ('EventID', 'EventTypeID', 'StartSecondHi', 'StartSecondLo',
+                  'DurationHi', 'DurationLo', 'EventString', 'EventCategoryID',
+                  'IsEndEvent')
+        missing = [n for n in ('EventID', 'EventTypeID', 'StartSecondHi',
+                               'StartSecondLo') if n.lower() not in columns]
+        if missing:
+            if verbose:
+                print('EEGEvent in %s lacks %s - cannot read events from this '
+                      'schema.' % (os.path.basename(path), ', '.join(missing)))
+            return []
+        rows, at = _select(cursor, 'EEGEvent', columns, wanted)
+
+        def value(row, name):
+            position = at[name]
+            return None if position is None else row[position]
+
         events = []
-        for row in cursor.fetchall():
-            eventId = row[0]
+        for row in rows:
+            eventId = value(row, 'EventID')
             events.append({
                 'id': eventId,
-                'type_id': row[1],
-                'type_label': labels.get(row[1], ''),
-                'category': categories.get(row[7], ''),
-                'start_ns': decodeTime(row[2], row[3]),
-                'duration_ns': decodeTime(row[4], row[5]),
-                'text': (row[6] or '').strip(),
-                'is_end_event': bool(row[8]),
+                'type_id': value(row, 'EventTypeID'),
+                'type_label': labels.get(value(row, 'EventTypeID'), ''),
+                'category': categories.get(value(row, 'EventCategoryID'), ''),
+                'start_ns': decodeTime(value(row, 'StartSecondHi'),
+                                       value(row, 'StartSecondLo')),
+                'duration_ns': decodeTime(value(row, 'DurationHi'),
+                                          value(row, 'DurationLo')),
+                'text': (value(row, 'EventString') or '').strip(),
+                'is_end_event': bool(value(row, 'IsEndEvent')),
                 'traces': traces.get(eventId, []),
                 'montage': montages.get(eventId),
             })
@@ -162,6 +247,23 @@ def readEvents(studyPath, verbose=True):
 
     if verbose:
         printEvents(events, os.path.basename(path))
+    return events
+
+
+def describeTypes(studyPath):
+    """What event types a study holds - the way to find a detector's type ids.
+
+    Run this on a study the detector has processed and its spike and seizure
+    types will stand out as ones this project does not otherwise see.
+    """
+    events = readEvents(studyPath, verbose=False)
+    for (typeId, label), count in sorted(summariseTypes(events).items(),
+                                         key=lambda kv: -kv[1]):
+        samples = [e['text'] for e in events
+                   if e['type_id'] == typeId and e['text']][:3]
+        print('  %5dx  type %-8s %-22s %s'
+              % (count, typeId, label or '(no unambiguous name)',
+                 '; '.join(repr(s) for s in samples)))
     return events
 
 

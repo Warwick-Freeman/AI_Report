@@ -361,18 +361,26 @@ def detectionsFromAnnotations(annotations, spikeHints=('spike', 'reveal'),
     return out
 
 
-# Event TYPES a detector writes into a study. Matched against the type's own
-# name - from EEGEventString, or cmpeeg's type_str - and never against the event
-# text, because the text is authored by whoever was at the keyboard.
+# Event TYPES a detector writes into a study.
 #
-# Demo.eeg makes the case: matching text picked up 'Cz,F3/C3, F4/C4 spikes'
-# (a technologist noting what they saw), and 'immediate post-ictal' and 'later
-# post-ictal' both matched the substring "ictal". All three are human notes on a
-# study that has never been through a detector, and all three would have become
-# fabricated epileptiform findings in the report.
+# The reliable discriminator is the numeric EventTypeID, and nothing else. Two
+# findings from the demo studies settled that:
 #
-# Word boundaries for the same reason, and post-ictal is excluded explicitly:
-# a note about the period after a seizure is not a seizure detection.
+#   Event text is whatever the person at the keyboard typed. Matching it turned
+#   'Cz,F3/C3, F4/C4 spikes' (a technologist noting what they saw), and
+#   'immediate post-ictal' and 'later post-ictal' (both on the substring
+#   "ictal"), into scored epileptiform findings on Demo.eeg - a study no
+#   detector has ever run on. 06MS.eeg has an operator note reading
+#   '?sharp wave', which is a question, not a finding.
+#
+#   Type names mostly do not exist. EEGEventString is a pick-list of predefined
+#   annotation texts, every row of it EventTypeID 1, and it is empty outright in
+#   four of the seven studies. studyevents only reports a label where a type id
+#   maps to exactly one string, so a pick-list yields nothing.
+#
+# Hence: pass typeIds with the detector's own EventTypeID values. The name
+# patterns below are a secondary route for a detector that names its event type,
+# and can no longer fire on a pick-list entry.
 STUDY_SPIKE_TYPES = (r'\bspikes?\b', r'\breveal\b', r'\bepileptiform\b',
                      r'\bsharp[\s-]?waves?\b', r'\bspike[\s-]?detection\b')
 STUDY_SEIZURE_TYPES = (r'\bseizures?\b', r'\bictal\b', r'\bseizure[\s-]?detection\b')
@@ -415,6 +423,10 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
 
         if spikeIds or seizureIds:
             isSpike, isSeizure = typeId in spikeIds, typeId in seizureIds
+        elif not label:
+            # No name for this type, so nothing can be concluded from it. Only
+            # an explicit type id can identify these.
+            continue
         else:
             if _matchesAny(label, STUDY_TYPE_EXCLUSIONS):
                 excluded += 1
@@ -450,8 +462,10 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
             for (tid, label), count in sorted(
                     studyevents.summariseTypes(events).items(), key=lambda kv: -kv[1]):
                 print('     %5dx  type %-8s %s' % (count, tid, label or '(unlabelled)'))
-            print('  None names a spike or seizure detector. If the detector has '
-                  'run, pass typeIds={"spike": [...], "seizure": [...]} with its '
-                  'EventTypeID values - selecting by type is reliable where '
-                  'matching names is not.')
+            print('  No event type here names a spike or seizure detector.')
+            print('  If the detector has run on this study, pass typeIds='
+                  '{"spike": [...], "seizure": [...]} with its EventTypeID '
+                  'values. Event text cannot be used to identify detections: it '
+                  'is operator-authored, and most event types carry no name at '
+                  'all. studyevents.describeTypes() shows types with samples.')
     return out
