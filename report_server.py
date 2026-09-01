@@ -36,6 +36,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import report_api
 
+# Bumped whenever the front end starts relying on something new from the API.
+#
+# The page's static files are read from disk on every request, so editing them
+# takes effect on the next reload while the Python process keeps running the code
+# it started with. A new front end then talks to an old API and misreads what it
+# gets back - a missing field looks like an empty one. The page compares this
+# against what it expects and says to restart rather than guessing.
+API_VERSION = 2
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
 
@@ -386,8 +395,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/config':
             import study_runner
             available = study_runner.availableProviders()
+            defaults = dict(study_runner.DEFAULTS)
+            # Show the model that will actually be used, not the one in the
+            # defaults table - with no key for the default provider they differ,
+            # and the Settings screen showing the unusable one is misleading.
+            if available:
+                defaults['llm_model'] = available[0][2]
             return self._send(200, {
-                'defaults': study_runner.DEFAULTS,
+                'api': API_VERSION,
+                'defaults': defaults,
                 'provenance': report_api.SECTIONS,
                 'study': self.server.startStudy,
                 # Provider names and the model each would use. No keys: the

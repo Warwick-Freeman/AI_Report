@@ -27,6 +27,10 @@ var RAIL = [
   { id: 'settings', num: '13', label: 'Settings' }
 ];
 
+// What this page needs from the API. The server reports its own; a lower number
+// means the server is running code older than this file.
+var API_EXPECTED = 2;
+
 var PROV_LABEL = {
   measured: 'Measured',
   model: 'Model \u2014 unverified',
@@ -46,6 +50,7 @@ var S = {
   options: {},
   defaults: {},
   llm: null,
+  stale: false,
   pdf: null,
   data: null,
   error: null,
@@ -251,22 +256,33 @@ function renderHome() {
   // It is disabled with the reason rather than left tickable and failing, and
   // when it is available it names the provider that will answer - the front end
   // has no picker, so the choice is worth stating.
-  var llm = S.llm || {};
-  var providers = llm.available || [];
-  var aiHint, aiDisabled = null;
-  if (providers.length) {
-    aiHint = 'Adds a drafted summary, using ' + providers[0].model + ' (' +
-      providers[0].provider + '). Offered as a draft and never as a scored value.';
-  } else {
-    aiHint = 'Adds a drafted summary. Offered as a draft and never as a scored value.';
-    aiDisabled = 'No language-model key in config.env. Set one of ' +
-      (llm.wanted || []).join(', ') +
-      '. Everything else in the report is produced without a provider.';
+  var aiHint = 'Adds a drafted summary. Offered as a draft and never as a ' +
+    'scored value.';
+  var aiDisabled = null;
+  if (S.llm) {
+    var providers = S.llm.available || [];
+    if (providers.length) {
+      aiHint = 'Adds a drafted summary, using ' + providers[0].model + ' (' +
+        providers[0].provider + '). Offered as a draft and never as a scored value.';
+    } else {
+      aiDisabled = 'No language-model key in config.env. Set one of ' +
+        (S.llm.wanted || []).join(', ') +
+        '. Everything else in the report is produced without a provider.';
+    }
   }
+  // S.llm null means the server did not say. Left selectable: the server will
+  // refuse the request with a reason if it cannot honour it.
   var html = headHtml('Report home',
     'Start a new report for a study. The analysis runs once; everything after ' +
     'that is review.');
 
+  if (S.stale) {
+    html += emptyHtml('failed', 'Server out of date',
+      'The report server is running older code than this page.',
+      'The page was reloaded from disk but the server process was not ' +
+      'restarted, so some options here may not work and may be shown ' +
+      'incorrectly. Close the report server window and start it again.');
+  }
   if (S.error) {
     html += emptyHtml('failed', 'Could not start', 'The analysis did not start.',
                       S.error);
@@ -703,6 +719,26 @@ function renderSettings() {
       return '<tr><td class="nowrap">' + prov(k) + '</td><td><span class="basis" ' +
         'style="margin:0">' + esc(why) + '</span></td></tr>';
     }).join('') + '</tbody></table></div>';
+  html += '<div class="panel"><h3 class="sub">Language model</h3>';
+  if (!S.llm) {
+    html += '<p class="job">The server did not report which providers are ' +
+      'available. Restart it.</p>';
+  } else if ((S.llm.available || []).length) {
+    html += '<table><thead><tr><th scope="col">Provider</th>' +
+      '<th scope="col">Model</th><th scope="col">Use</th></tr></thead><tbody>';
+    S.llm.available.forEach(function (p, i) {
+      html += '<tr><td class="value">' + esc(p.provider) + '</td><td>' +
+        esc(p.model) + '</td><td>' + (i === 0 ? 'used for the narrative' :
+          'available') + '</td></tr>';
+    });
+    html += '</tbody></table><p class="job">Keys live in config.env and are ' +
+      'never sent to this page. There is no provider picker here by design.</p>';
+  } else {
+    html += '<p class="job">No usable key in config.env. Looked for ' +
+      esc((S.llm.wanted || []).join(', ')) + '.</p>';
+  }
+  html += '</div>';
+
   html += '<div class="panel"><h3 class="sub">Analysis defaults</h3>' +
     '<pre class="log">' + esc(JSON.stringify(S.defaults, null, 1)) + '</pre></div>';
   document.getElementById('main').innerHTML = html;
@@ -910,8 +946,14 @@ api('/api/config').then(function (c) {
   S.defaults = c.defaults || {};
   S.options = Object.assign({}, c.defaults);
   delete S.options.study;
-  S.llm = c.llm || { available: [], wanted: [] };
-  if (!(S.llm.available || []).length) S.options.aiReport = false;
+  // A field the server did not send is unknown, not empty. Reading an absent
+  // llm block as 'no keys available' greyed out the narrative option against a
+  // server that simply predated it - the page's files are reloaded from disk
+  // while the process keeps its old code, so a new front end can meet an old
+  // API. Staleness is reported instead of guessed at.
+  S.stale = (c.api || 0) < API_EXPECTED;
+  S.llm = c.llm || null;
+  if (S.llm && !(S.llm.available || []).length) S.options.aiReport = false;
   if (c.study) S.study = c.study;
 
   // Rejoin a session named in the URL, so a reload keeps the analysis.
@@ -927,9 +969,11 @@ api('/api/config').then(function (c) {
     S.status = 'idle';
   }
   if (hash.theme === 'light' || hash.theme === 'dark') S.theme = hash.theme;
+  // The route is honoured whether or not a session is named, so a screen can be
+  // bookmarked or linked to on its own.
+  if (hash.route) S.route = hash.route;
   if (hash.session) {
     S.session = hash.session;
-    if (hash.route) S.route = hash.route;
     return refresh().then(function () {
       if (S.status === 'running' || S.status === 'generating') poll();
     }).catch(function () {
