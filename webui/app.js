@@ -51,6 +51,7 @@ var S = {
   defaults: {},
   llm: null,
   stale: false,
+  pid: null,
   pdf: null,
   data: null,
   error: null,
@@ -279,9 +280,14 @@ function renderHome() {
   if (S.stale) {
     html += emptyHtml('failed', 'Server out of date',
       'The report server is running older code than this page.',
-      'The page was reloaded from disk but the server process was not ' +
-      'restarted, so some options here may not work and may be shown ' +
-      'incorrectly. Close the report server window and start it again.');
+      'The page is reloaded from disk on every visit, but the server keeps the ' +
+      'code it started with. ' +
+      (S.pid ? 'The process answering this page is PID ' + S.pid + '. ' : '') +
+      'If you have already restarted it, an older server is probably still ' +
+      'holding the port and answering instead - on Windows a second server can ' +
+      'bind the same port without complaint. Close every report server window, ' +
+      'check none is left with: netstat -ano | findstr :' + location.port +
+      ', then start one again.');
   }
   if (S.error) {
     html += emptyHtml('failed', 'Could not start', 'The analysis did not start.',
@@ -952,6 +958,7 @@ api('/api/config').then(function (c) {
   // while the process keeps its old code, so a new front end can meet an old
   // API. Staleness is reported instead of guessed at.
   S.stale = (c.api || 0) < API_EXPECTED;
+  S.pid = c.pid || null;
   S.llm = c.llm || null;
   if (S.llm && !(S.llm.available || []).length) S.options.aiReport = false;
   if (c.study) S.study = c.study;

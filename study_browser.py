@@ -30,6 +30,11 @@ import study_runner
 LANGUAGES = ['english', 'traditional chinese', 'simplified chinese', 'japanese',
              'korean', 'spanish', 'french', 'german']
 
+# The report server API this build expects, matching report_server.API_VERSION
+# and the front end's own expectation. A running server reporting less than this
+# is older than the page it would serve.
+REVIEW_API_EXPECTED = 2
+
 LLM_MODELS = ['gemini-1.5-pro', 'gemini-1.5-flash', 'claude-3-5-sonnet-20240620',
               'gpt-4o']
 
@@ -475,6 +480,26 @@ class StudyBrowser(QMainWindow):
         finally:
             probe.close()
 
+    def reviewServerVersion(self):
+        """The API version and pid of the server on the review port, or None.
+
+        The browser reuses a server that is already listening, which is right -
+        it may be holding an analysis. But reusing one that predates the current
+        front end hands the reader a page that cannot work properly against it,
+        and the only remedy is to close it. Better to say so here than to open
+        the page and let it complain.
+        """
+        import json
+        import urllib.request
+        try:
+            with urllib.request.urlopen(
+                    'http://127.0.0.1:%d/api/config' % self.reviewPort,
+                    timeout=2) as response:
+                config = json.load(response)
+            return int(config.get('api') or 0), config.get('pid')
+        except Exception:
+            return None
+
     def openReviewUI(self):
         """Hand the selected study to the review front end.
 
@@ -537,6 +562,22 @@ class StudyBrowser(QMainWindow):
                     self, 'Front end did not start',
                     'The review server did not start listening on port %d.'
                     % self.reviewPort)
+                return
+
+        version = self.reviewServerVersion()
+        if version and version[0] < REVIEW_API_EXPECTED:
+            api, pid = version
+            answer = QMessageBox.warning(
+                self, 'An older report server is running',
+                'The server on port %d reports API version %d; this build needs '
+                '%d.%s\n\nIt is running code older than the current front end, '
+                'so options may be missing or shown incorrectly. Close its '
+                'console window and click Review again.\n\nOpen it anyway?'
+                % (self.reviewPort, api, REVIEW_API_EXPECTED,
+                   ('' if pid is None else ' Its process id is %s.' % pid)),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
                 return
 
         url = QUrl('http://127.0.0.1:%d/#study=%s'

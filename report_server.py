@@ -403,6 +403,9 @@ class Handler(BaseHTTPRequestHandler):
                 defaults['llm_model'] = available[0][2]
             return self._send(200, {
                 'api': API_VERSION,
+                # So a reader can identify the process answering them when it
+                # turns out not to be the one they just started.
+                'pid': os.getpid(),
                 'defaults': defaults,
                 'provenance': report_api.SECTIONS,
                 'study': self.server.startStudy,
@@ -538,13 +541,63 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {'error': 'unknown endpoint'})
 
 
+class ReportServer(ThreadingHTTPServer):
+    """The server, with address reuse switched off deliberately.
+
+    HTTPServer sets allow_reuse_address = 1, and on Windows SO_REUSEADDR does not
+    mean what it means on Unix: it lets a second socket bind a port another
+    process is already listening on, and which of them receives a given
+    connection is undefined. So restarting this server while an old one was still
+    running appeared to work - no error, a fresh console, a URL - while the
+    browser went on talking to the old process. The symptom was the front end
+    reporting a server older than itself, with nothing to explain why restarting
+    had not helped.
+
+    With reuse off, binding a port in use fails and says so.
+    """
+    allow_reuse_address = False
+
+
+def portInUse(port):
+    """Whether something is already listening on the loopback port."""
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(0.3)
+    try:
+        return probe.connect_ex(('127.0.0.1', port)) == 0
+    finally:
+        probe.close()
+
+
 def serve(port=8731, study=None, openBrowser=True):
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    # Checked before binding as well, because the message is better than the
+    # OSError and because a stray listener is the common case, not a rare one.
+    if portInUse(port):
+        print('Port %d is already in use, most likely by a report server that is '
+              'still running.' % port)
+        print('')
+        print('That other server keeps answering the browser, so a page loaded '
+              'now would still be served by its code.')
+        print('Close its console window. To find it:')
+        print('    netstat -ano | findstr :%d' % port)
+        print('    taskkill /PID <the pid listed> /F')
+        print('Or serve on another port:  python report_server.py --port %d'
+              % (port + 1))
+        return 2
+
+    try:
+        server = ReportServer(('127.0.0.1', port), Handler)
+    except OSError as e:
+        print('Could not listen on port %d: %s' % (port, e))
+        print('Close whatever is using it, or pass --port with another number.')
+        return 2
+
     server.startStudy = study
     url = 'http://127.0.0.1:%d/' % server.server_address[1]
     print('SCORE report review front end')
     print('  %s' % url)
     print('  serving %s' % WEBUI)
+    print('  process %d' % os.getpid())
     if study:
         print('  study  %s' % study)
     print('  Ctrl+C to stop')
@@ -556,6 +609,7 @@ def serve(port=8731, study=None, openBrowser=True):
         print('\nstopped')
     finally:
         server.server_close()
+    return 0
 
 
 def main():
@@ -564,7 +618,7 @@ def main():
     parser.add_argument('--study', help='study to open on start')
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args()
-    serve(args.port, args.study, not args.no_browser)
+    return serve(args.port, args.study, not args.no_browser)
 
 
 if __name__ == '__main__':
