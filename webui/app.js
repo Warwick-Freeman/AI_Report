@@ -108,6 +108,7 @@ function go(route) {
 function writeHash() {
   var parts = [];
   if (S.session) parts.push('session=' + S.session);
+  else if (S.study) parts.push('study=' + encodeURIComponent(S.study));
   if (S.route && S.route !== 'home') parts.push('route=' + S.route);
   if (S.theme !== 'dark') parts.push('theme=' + S.theme);
   var hash = parts.length ? '#' + parts.join('&') : '';
@@ -288,7 +289,10 @@ function renderHome() {
       S.options[key] = input.type === 'checkbox' ? input.checked : input.value;
     };
   });
-  document.getElementById('studyPath').onchange = function (e) { S.study = e.target.value.trim(); };
+  document.getElementById('studyPath').onchange = function (e) {
+    S.study = e.target.value.trim();
+    writeHash();
+  };
   document.getElementById('runBtn').onclick = startAnalysis;
   var review = document.getElementById('reviewBtn');
   if (review) review.onclick = function () { go('recording'); };
@@ -871,6 +875,16 @@ api('/api/config').then(function (c) {
 
   // Rejoin a session named in the URL, so a reload keeps the analysis.
   var hash = readHash();
+
+  // A study named in the URL wins. The server outlives any one study - the
+  // study browser reuses a running one for whatever is selected next - so the
+  // study travels with the request rather than being fixed at start-up.
+  if (hash.study) {
+    S.study = hash.study;
+    S.session = null;
+    S.report = null;
+    S.status = 'idle';
+  }
   if (hash.theme === 'light' || hash.theme === 'dark') S.theme = hash.theme;
   if (hash.session) {
     S.session = hash.session;

@@ -532,6 +532,10 @@ value's provenance and the reader's overrides.
   here - the Episodes page lists them and leaves them blank.
 - UI strings are not externalised, so the language selector the brief describes
   is absent rather than present-and-disabled.
+- The brief asks for a persistent, non-dismissible proof-of-concept label. It
+  was removed from the page on request; its placeholder wording and the
+  regulatory framing were never settled. Nothing marks the build as
+  not-for-diagnostic-use on screen.
 - Jump-to-time back into the Profusion waveform view needs the host
   application and does nothing standalone.
 

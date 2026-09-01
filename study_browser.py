@@ -13,6 +13,7 @@
 import os
 import sys
 import json
+import time
 
 from PyQt6.QtCore import Qt, QProcess, QSettings, QUrl
 from PyQt6.QtGui import QDesktopServices, QFont
@@ -459,13 +460,30 @@ class StudyBrowser(QMainWindow):
         # care whether a batch run is in progress here.
         self.reviewButton.setEnabled(usable)
 
+    def reviewServerListening(self):
+        """Whether something is already serving on the review port.
+
+        Asked of the port rather than remembered in a field: a server started by
+        an earlier run of this window is still there, and starting a second one
+        would fail to bind and die without saying why.
+        """
+        import socket
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.settimeout(0.25)
+        try:
+            return probe.connect_ex(('127.0.0.1', self.reviewPort)) == 0
+        finally:
+            probe.close()
+
     def openReviewUI(self):
         """Hand the selected study to the review front end.
 
-        The server is started detached and outlives this window on purpose: it
-        holds the analysis in memory so the reader can review the findings and
-        then generate the document without paying for the analysis twice. It is
-        a console process the reader closes when finished.
+        The study travels in the URL, not in the server's arguments. The server
+        is long-lived - it holds an analysis in memory so the reader can review
+        and then generate without paying for the analysis twice - so one server
+        serves whatever study is picked next. Passing the study at start-up
+        meant the second study reviewed in a sitting silently got the first
+        one's path.
         """
         study = self.selectedStudy()
         if not study:
@@ -473,7 +491,7 @@ class StudyBrowser(QMainWindow):
         path = study.get('path')
         if not path or not os.path.exists(path):
             QMessageBox.warning(self, 'Study not found',
-                                'The selected study is not on disk:' + chr(10) + path)
+                                'The selected study is not on disk:' + chr(10) + str(path))
             return
 
         here = os.path.dirname(os.path.abspath(__file__))
@@ -483,24 +501,52 @@ class StudyBrowser(QMainWindow):
                                 'report_server.py is not in %s' % here)
             return
 
-        url = QUrl('http://127.0.0.1:%d/' % self.reviewPort)
-        if self.reviewPid:
-            # Already serving. Point the browser at it rather than starting a
-            # second server, which would fail to bind the port.
-            QDesktopServices.openUrl(url)
-            return
+        if not self.reviewServerListening():
+            # --no-browser: the server would otherwise open the bare page, and
+            # the study would be lost. This opens the URL itself, below.
+            #
+            # Launched through cmd's start so it gets a console window of its
+            # own. Started directly it inherits this window's console, which
+            # means its log is tangled with the browser's and there is nothing
+            # for the reader to close when they have finished. The first
+            # argument to start is the window title, which also keeps it from
+            # mistaking a quoted path for one.
+            command = [server, '--port', str(self.reviewPort), '--no-browser']
+            started, pid = QProcess.startDetached(
+                'cmd.exe',
+                ['/c', 'start', 'SCORE report server', '/d', here,
+                 sys.executable] + command,
+                here)
+            if not started:
+                # No cmd.exe, or it refused. Fall back to launching the server
+                # directly - it shares this console, which is worse than a
+                # window of its own but better than no review front end.
+                started, pid = QProcess.startDetached(sys.executable, command, here)
+            if not started:
+                QMessageBox.critical(self, 'Could not start the front end',
+                                     'Failed to launch %s' % server)
+                return
+            self.reviewPid = pid
+            # Give it a moment to bind before pointing a browser at it.
+            deadline = time.time() + 15.0
+            while time.time() < deadline and not self.reviewServerListening():
+                QApplication.processEvents()
+                time.sleep(0.15)
+            if not self.reviewServerListening():
+                QMessageBox.critical(
+                    self, 'Front end did not start',
+                    'The review server did not start listening on port %d.'
+                    % self.reviewPort)
+                return
 
-        started, pid = QProcess.startDetached(
-            sys.executable,
-            [server, '--port', str(self.reviewPort), '--study', path], here)
-        if not started:
-            QMessageBox.critical(self, 'Could not start the front end',
-                                 'Failed to launch %s' % server)
-            return
-        self.reviewPid = pid
+        url = QUrl('http://127.0.0.1:%d/#study=%s'
+                   % (self.reviewPort,
+                      bytes(QUrl.toPercentEncoding(os.path.abspath(path))).decode('ascii')))
+        QDesktopServices.openUrl(url)
         self.statusBar().showMessage(
-            'Review front end serving on %s - it opens a console window; close '
-            'that when finished' % url.toString(), 15000)
+            'Review front end serving on 127.0.0.1:%d - it keeps running in its '
+            'own window so an analysis survives; close that window when '
+            'finished' % self.reviewPort, 15000)
 
     def _aiToggled(self):
         """Show whether the selected model has a usable key in config.env."""

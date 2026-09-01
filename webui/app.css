@@ -42,12 +42,8 @@ button,input,select,textarea{font:inherit;font-variant-numeric:tabular-nums;colo
 #app{min-height:100vh;background:var(--p-canvas);display:flex;justify-content:center;padding:0}
 .shell{width:100%;max-width:1400px;background:var(--p-surface);display:flex;flex-direction:column;min-height:100vh}
 
-.notice{display:flex;align-items:center;gap:8px;padding:5px 14px;
-  background:var(--p-notice-bg);color:var(--p-notice-fg);
-  border-bottom:1px solid var(--p-notice-rule)}
-.notice-mark{width:8px;height:8px;background:var(--p-notice-rule);flex:none}
-.notice span{font-size:10.5px;letter-spacing:.06em;line-height:1.3;
-  font-weight:600;min-width:0}
+/* The --p-notice-* tokens above are kept - they are part of the design's
+   palette - but the banner they styled has been removed from the page. */
 
 .studybar{padding:10px 16px;border-bottom:1px solid var(--p-border-subtle);
   background:var(--p-raised);display:flex;flex-wrap:wrap;gap:4px 22px;align-items:baseline}
@@ -177,7 +173,7 @@ button.mini:disabled{opacity:.4;cursor:not-allowed}
 button.mini:disabled:hover{background:transparent}
 
 /* Wide content scrolls in its own box so the page never scrolls sideways -
-   which at 420 px would carry the rail and the regulatory notice off screen. */
+   which at 420 px would carry the navigation rail off screen. */
 .tablewrap{overflow-x:auto;max-width:100%}
 .tablewrap table{min-width:520px}
 .main{min-width:0}
@@ -193,5 +189,4 @@ button.mini:disabled:hover{background:transparent}
   .head{flex-direction:column;align-items:stretch}
   .head .head-actions{width:100%}
   .main{padding:14px 12px 22px}
-  .notice{padding:5px 12px}
 }
