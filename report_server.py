@@ -71,6 +71,30 @@ class Tee(io.TextIOBase):
             pass
 
 
+def ensureOutputFolder(path):
+    """Create the output folder now, and report why if it cannot be.
+
+    Checked before the analysis starts, not at the end of it. The folder is only
+    needed when the document is written, so leaving it unchecked meant a reader
+    waited out a few minutes of analysis and then learnt that the folder they
+    typed could not be made. A relative path is resolved here too, so the
+    message names somewhere real.
+
+    Returns (absolutePath, error).
+    """
+    raw = path or './reports'
+    absolute = os.path.abspath(raw)
+    if os.path.isdir(absolute):
+        return absolute, None
+    if os.path.exists(absolute):
+        return absolute, ('%s already exists and is not a folder.' % absolute)
+    try:
+        os.makedirs(absolute)
+    except OSError as e:
+        return absolute, ('Cannot create the output folder %s: %s' % (absolute, e))
+    return absolute, None
+
+
 def runAnalysis(sessionId, study, options):
     """Analyse one study, then leave the instance available for generation."""
     import contextlib
@@ -148,6 +172,14 @@ def generateDocument(sessionId):
     instance = session.get('instance')
     if instance is None:
         raise RuntimeError('nothing analysed in this session')
+
+    folder, folderError = ensureOutputFolder(instance.dest_pdfPath)
+    if folderError:
+        with LOCK:
+            session['status'] = 'ready'
+            session['error'] = folderError
+        return
+    instance.dest_pdfPath = folder
 
     applied = report_api.applyOverrides(session['report'], session.get('overrides'))
     session['report'] = applied
@@ -372,11 +404,19 @@ class Handler(BaseHTTPRequestHandler):
             study = (body.get('study') or '').strip()
             if not (os.path.isdir(study) or os.path.isfile(study)):
                 return self._send(400, {'error': 'study not found: %s' % study})
+
+            # Settle the output folder before spending minutes on the analysis.
+            options = dict(body.get('options') or {})
+            folder, folderError = ensureOutputFolder(options.get('dest_pdfPath'))
+            if folderError:
+                return self._send(400, {'error': folderError})
+            options['dest_pdfPath'] = folder
+
             sessionId = uuid.uuid4().hex[:12]
             SESSIONS[sessionId] = {'status': 'running', 'log': [], 'study': study,
                                    'report': None, 'overrides': {}, 'instance': None}
             thread = threading.Thread(target=runAnalysis,
-                                      args=(sessionId, study, body.get('options') or {}),
+                                      args=(sessionId, study, options),
                                       daemon=True)
             thread.start()
             return self._send(200, {'id': sessionId, 'status': 'running'})

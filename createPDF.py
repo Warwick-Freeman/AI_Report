@@ -27,12 +27,23 @@ class writePDF:
             else:
                 dest_folder += '\\'
 
-        #create a folder if not exist
+        # Create the output folder, and say so plainly if it cannot be created.
+        #
+        # This used to print the error and carry on, which meant the next thing
+        # to happen was a figure failing to save and the caller seeing a
+        # FileNotFoundError about a .jpg - with nothing to connect it to the
+        # output folder that was the actual problem. A nested path is fine:
+        # makedirs is recursive.
         if not os.path.exists(dest_folder):
             try:
                 os.makedirs(dest_folder)
-            except Exception as e:
-                print ('Error: ', e)
+            except OSError as e:
+                raise OSError(
+                    'Cannot create the output folder %r: %s'
+                    % (os.path.abspath(dest_folder), e)) from e
+        if not os.path.isdir(dest_folder):
+            raise OSError('The output folder %r is not a folder'
+                          % os.path.abspath(dest_folder))
         self.dest_folder=dest_folder  
         self.results=results
 

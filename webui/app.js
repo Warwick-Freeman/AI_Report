@@ -47,6 +47,7 @@ var S = {
   defaults: {},
   pdf: null,
   data: null,
+  error: null,
   polling: null,
   busy: false
 };
@@ -243,6 +244,11 @@ function renderHome() {
     'Start a new report for a study. The analysis runs once; everything after ' +
     'that is review.');
 
+  if (S.error) {
+    html += emptyHtml('failed', 'Could not start', 'The analysis did not start.',
+                      S.error);
+  }
+
   html += '<div class="panel"><h3 class="sub">Study</h3>' +
     '<div class="grid"><label class="field" style="flex:1;min-width:340px">' +
     '<span>Study folder or EEG file</span>' +
@@ -341,6 +347,10 @@ function renderAnalysis() {
     html += '</tbody></table>';
   }
 
+  if (S.error) {
+    html += emptyHtml('failed', 'Error', 'The analysis reported a problem.',
+                      S.error);
+  }
   html += '<h3 class="sub">Analysis log</h3><pre class="log" id="logBox">' +
     esc(S.log || '(nothing yet)') + '</pre>';
 
@@ -627,6 +637,10 @@ function renderGenerate() {
         'outstanding. The document can be written, and each will appear as ' +
         'not scored rather than as a negative finding.</div>';
     }
+    if (S.error) {
+      html += emptyHtml('failed', 'Not written',
+        'The document was not written.', S.error);
+    }
     if (S.pdf) {
       html += '<div class="panel sunk"><h3 class="sub">Written</h3>' +
         '<p style="margin:4px 0">' + esc(S.pdf) +
@@ -771,6 +785,7 @@ function startAnalysis() {
   S.status = 'running';
   S.log = '';
   S.pdf = null;
+  S.error = null;
   S.report = null;
   S.route = 'analysis';
   render();
@@ -781,8 +796,9 @@ function startAnalysis() {
       poll();
     })
     .catch(function (e) {
-      S.status = 'failed';
-      S.log = String(e.message || e);
+      S.status = 'idle';
+      S.error = String(e.message || e);
+      S.route = 'home';
       render();
     });
 }
@@ -797,7 +813,7 @@ function refresh() {
     S.busy = r.status === 'generating';
     if (r.report) S.report = r.report;
     if (r.outstanding) S.outstanding = r.outstanding;
-    if (r.error) S.log += '\n' + r.error;
+    S.error = r.error || null;
     render();
   });
 }
@@ -896,7 +912,7 @@ api('/api/config').then(function (c) {
       // showing an empty review as though nothing had been analysed.
       S.session = null;
       S.route = 'home';
-      S.log = 'That analysis is no longer on the server - it was restarted. ' +
+      S.error = 'That analysis is no longer on the server - it was restarted. ' +
         'Run the analyses again.';
       render();
     });

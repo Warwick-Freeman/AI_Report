@@ -515,6 +515,17 @@ withholding it no longer holds.
 Empty sections say which kind of empty they are. *Not analysed* and *analysed,
 nothing found* are different clinical answers and the screen never blurs them.
 
+#### The output folder
+
+It is created if it does not exist, nesting and all, and it is settled when the
+analysis is requested rather than when the document is written - a folder that
+cannot be created is reported before a few minutes of analysis are spent on it,
+not after. A relative path resolves against the server's working directory, so
+the message names an absolute path.
+
+A folder that genuinely cannot be made - a file in the way, a drive that is not
+there, illegal characters - is refused with the reason.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,
