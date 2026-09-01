@@ -672,7 +672,8 @@ class StudyBrowser(QMainWindow):
             # "python study_runner.py <this file>".
             optionsPath = os.path.join(
                 options['dest_pdfPath'],
-                os.path.basename(study['path']).split('.')[0] + '_options.json')
+                os.path.splitext(os.path.basename(study['path']))[0]
+                + '_options.json')
             with open(optionsPath, 'w', encoding='utf-8') as f:
                 json.dump(options, f, indent=2)
         except OSError as e:

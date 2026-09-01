@@ -45,6 +45,7 @@ class writePDF:
         self.ai_report_text=ai_report_text
         self.deleteJpg=deleteJpg
         
+        self.outFile=None
         self.savePDF(results)  
         # delete eeg jpg
         if deleteJpg:
@@ -312,9 +313,18 @@ class writePDF:
         self.writeConclusionPage(pdf, fontName, line_height, wanted('conclusion', results.get('conclusion')))
         self.writeAiPage(pdf, fontName, line_height, wanted('conclusion', results.get('conclusion')))
 
-        outFile=self.dest_folder+self.fileName.split('.')[0]+'.pdf'
+        # splitext, not split('.'): a study called
+        # 'Surname, Given 2024.01.15.eeg' truncated at the first dot, and any
+        # caller that reconstructed the name the other way looked for a file
+        # that was never written.
+        outFile=os.path.join(self.dest_folder,
+                             os.path.splitext(self.fileName)[0]+'.pdf')
         pdf.output(outFile)
+        # Recorded so callers use the path that was actually written instead of
+        # rebuilding it and having to agree about how names are truncated.
+        self.outFile=os.path.abspath(outFile)
         print ('Successfully generate pdf file: ', outFile)
+        return self.outFile
         # open pdf file
         # os.system('start '+ outFile)
         

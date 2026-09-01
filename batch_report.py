@@ -58,7 +58,8 @@ def buildOptions(recording, outputFolder, overrides):
 def runOne(recording, outputFolder, overrides, python=None):
     """Run one recording. Returns a result dict; never raises."""
     name = os.path.basename(recording.rstrip('/\\'))
-    stem = name.split('.')[0]
+    # splitext, so a name containing a dot is not truncated at the first one.
+    stem = os.path.splitext(name)[0]
     optionsPath = os.path.join(outputFolder, stem + '_options.json')
     options = buildOptions(recording, outputFolder, overrides)
 

@@ -157,10 +157,14 @@ def generateDocument(sessionId):
     try:
         with DRAW, contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
             instance.outputPdf = True
-            instance.writeDocument()
-        stem = os.path.splitext(instance.fileName)[0]
-        pdf = os.path.join(instance.dest_pdfPath, stem + '.pdf')
-        pdf = os.path.abspath(pdf) if os.path.isfile(pdf) else None
+            # The path comes back from the writer. Rebuilding it here meant
+            # agreeing with createPDF about how a filename is truncated, and a
+            # study name containing a dot broke that agreement: the document was
+            # written and this reported that it was not.
+            pdf = instance.writeDocument()
+        pdf = pdf if (pdf and os.path.isfile(pdf)) else None
+        stem = os.path.splitext(os.path.basename(pdf))[0] if pdf \
+            else os.path.splitext(instance.fileName)[0]
 
         # The structured SCORE data file, written beside the document. The
         # document is for a person; this is the same report as data, carrying
@@ -180,7 +184,14 @@ def generateDocument(sessionId):
             session['data'] = data
             session['status'] = 'ready'
             if not pdf:
-                session['error'] = 'no document was written'
+                # Say where it looked. 'No document was written' on its own gave
+                # a reader nothing to act on and hid a path disagreement between
+                # the writer and this.
+                session['error'] = (
+                    'No document was written. The writer reported %r and the '
+                    'output folder is %r - check that folder is writable.'
+                    % (getattr(instance, 'documentPath', None),
+                       os.path.abspath(instance.dest_pdfPath)))
     except Exception as e:
         with LOCK:
             session['status'] = 'ready'

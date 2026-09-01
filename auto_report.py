@@ -635,7 +635,8 @@ class CreateReport:
         """Write the report document from the analysis already in memory.
 
         Called by process() on the command-line path, and by the review front
-        end once the reader has finished with the findings.
+        end once the reader has finished with the findings. Returns the path
+        written.
         """
         if not getattr(self, '_documentInputs', None):
             raise RuntimeError('nothing analysed yet - call process() first')
@@ -650,9 +651,13 @@ class CreateReport:
                 print('Conclusion generation failed: %s' % e)
 
         inputs = self._documentInputs
-        writePDF(self.fileName, inputs['rawData'], inputs['epochs'],
-                 inputs['psds'], results, self.dest_pdfPath,
-                 inputs['sample_rate'], inputs['ch_names'], ai_report_text)
+        written = writePDF(self.fileName, inputs['rawData'], inputs['epochs'],
+                           inputs['psds'], results, self.dest_pdfPath,
+                           inputs['sample_rate'], inputs['ch_names'],
+                           ai_report_text)
+        # The path that was actually written, so no caller has to guess it.
+        self.documentPath = written.outFile
+        return self.documentPath
     
 
 

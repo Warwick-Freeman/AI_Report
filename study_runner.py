@@ -87,7 +87,11 @@ def parseDob(text):
 def expectedPdfPath(options):
     """Where writePDF will put the report, mirroring its own naming."""
     studyName = os.path.basename(options['study'].rstrip('/\\'))
-    return os.path.join(options['dest_pdfPath'], studyName.split('.')[0] + '.pdf')
+    # splitext, not split('.'): a study called 'Surname, Given 2024.01.15.eeg'
+    # truncated at the first dot and the report was then looked for under a
+    # name nothing had written.
+    return os.path.join(options['dest_pdfPath'],
+                        os.path.splitext(studyName)[0] + '.pdf')
 
 
 def run(options):
@@ -125,7 +129,7 @@ def run(options):
                                        if k != 'study'}, default=str))
     print('-' * 70, flush=True)
 
-    CreateReport(fileName, filePath,
+    report = CreateReport(fileName, filePath,
                  LLM_API_KEY=apiKey or '',
                  llm_model=options['llm_model'],
                  dest_pdfPath=options['dest_pdfPath'],
@@ -148,7 +152,9 @@ def run(options):
                  sleepBackend=options['sleepBackend'])
 
     if options['outputPdf']:
-        pdf = expectedPdfPath(options)
+        # The path the writer actually used, falling back to the expected one
+        # only if the run did not report it.
+        pdf = getattr(report, 'documentPath', None) or expectedPdfPath(options)
         if os.path.isfile(pdf):
             # The browser watches for this line to offer to open the report.
             print('-' * 70)
