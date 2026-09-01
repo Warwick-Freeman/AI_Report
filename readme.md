@@ -526,6 +526,17 @@ the message names an absolute path.
 A folder that genuinely cannot be made - a file in the way, a drive that is not
 there, illegal characters - is refused with the reason.
 
+#### The language model
+
+The front end has no provider or model picker - the brief put that out of scope -
+so the server picks. It uses the requested model when config.env has that
+provider's key, otherwise the first provider that does have one, and says which
+in the log. With no key at all the narrative option is disabled with the reason
+rather than left tickable and failing; everything else in the report is produced
+without a provider.
+
+No key is ever sent to the front end.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,

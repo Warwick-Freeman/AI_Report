@@ -45,6 +45,7 @@ var S = {
   study: '',
   options: {},
   defaults: {},
+  llm: null,
   pdf: null,
   data: null,
   error: null,
@@ -235,10 +236,32 @@ function headHtml(title, job, actions) {
 function renderHome() {
   var d = S.defaults;
   var o = S.options;
-  function checkbox(key, label, hint) {
+  function checkbox(key, label, hint, disabledReason) {
     return '<label class="check"><input type="checkbox" data-opt="' + key + '"' +
-      (o[key] ? ' checked' : '') + '><span>' + esc(label) +
-      (hint ? '<span class="basis">' + esc(hint) + '</span>' : '') + '</span></label>';
+      (o[key] && !disabledReason ? ' checked' : '') +
+      (disabledReason ? ' disabled aria-disabled="true"' : '') + '><span' +
+      (disabledReason ? ' style="color:var(--p-text-disabled)"' : '') + '>' +
+      esc(label) +
+      (hint ? '<span class="basis">' + esc(hint) + '</span>' : '') +
+      (disabledReason ? '<span class="basis">' + esc(disabledReason) + '</span>' : '') +
+      '</span></label>';
+  }
+
+  // The narrative is the one option that needs something outside this machine.
+  // It is disabled with the reason rather than left tickable and failing, and
+  // when it is available it names the provider that will answer - the front end
+  // has no picker, so the choice is worth stating.
+  var llm = S.llm || {};
+  var providers = llm.available || [];
+  var aiHint, aiDisabled = null;
+  if (providers.length) {
+    aiHint = 'Adds a drafted summary, using ' + providers[0].model + ' (' +
+      providers[0].provider + '). Offered as a draft and never as a scored value.';
+  } else {
+    aiHint = 'Adds a drafted summary. Offered as a draft and never as a scored value.';
+    aiDisabled = 'No language-model key in config.env. Set one of ' +
+      (llm.wanted || []).join(', ') +
+      '. Everything else in the report is produced without a provider.';
   }
   var html = headHtml('Report home',
     'Start a new report for a study. The analysis runs once; everything after ' +
@@ -268,7 +291,7 @@ function renderHome() {
     checkbox('useRepair', 'Repair bad channels') +
     '</div><div style="min-width:320px;flex:1">' +
     checkbox('aiReport', 'Draft the narrative with a language model',
-      'Adds a drafted summary. It is offered as a draft and never as a scored value.') +
+      aiHint, aiDisabled) +
     '<label class="field" style="margin-top:8px"><span>Sleep backend</span>' +
     '<select data-opt="sleepBackend">' +
     ['usleep', 'yasa'].map(function (b) {
@@ -887,6 +910,8 @@ api('/api/config').then(function (c) {
   S.defaults = c.defaults || {};
   S.options = Object.assign({}, c.defaults);
   delete S.options.study;
+  S.llm = c.llm || { available: [], wanted: [] };
+  if (!(S.llm.available || []).length) S.options.aiReport = false;
   if (c.study) S.study = c.study;
 
   // Rejoin a session named in the URL, so a reload keeps the analysis.

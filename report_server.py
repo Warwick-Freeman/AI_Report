@@ -95,6 +95,46 @@ def ensureOutputFolder(path):
     return absolute, None
 
 
+def resolveLlm(options):
+    """Settle which model will draft the narrative, or say why none can.
+
+    Returns (model, error, note). Only consulted when the narrative is asked
+    for; with it switched off the analysis and the document need no provider at
+    all. The note says which provider ended up answering, and belongs in the
+    session log rather than only on the console - a reader should know the
+    narrative came from a different model than the default named.
+
+    A model the caller named is honoured when its key is present. Otherwise the
+    first provider that does have a key is used, because the front end offers no
+    picker and silently keeping a default whose key is missing is what made the
+    option fail every time.
+    """
+    import study_runner
+
+    if not options.get('aiReport'):
+        return options.get('llm_model'), None, None
+
+    available = study_runner.availableProviders()
+    if not available:
+        wanted = ', '.join(envVar for _, envVar, _ in study_runner.PROVIDERS)
+        return None, ('The narrative needs a language-model key, and config.env '
+                      'has none. Set one of %s, or clear "Draft the narrative '
+                      'with a language model" - everything else in the report is '
+                      'produced without a provider.' % wanted), None
+
+    requested = options.get('llm_model')
+    wantedProvider = study_runner.providerFor(requested)
+    for name, _envVar, model in available:
+        if name == wantedProvider:
+            return requested, None, ('Narrative drafted with %s (%s).'
+                                     % (requested, name))
+
+    name, _envVar, model = available[0]
+    return model, None, (
+        'No key for %s, so the narrative will be drafted with %s (%s).'
+        % (requested or 'the requested model', model, name))
+
+
 def runAnalysis(sessionId, study, options):
     """Analyse one study, then leave the instance available for generation."""
     import contextlib
@@ -345,10 +385,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/config':
             import study_runner
+            available = study_runner.availableProviders()
             return self._send(200, {
                 'defaults': study_runner.DEFAULTS,
                 'provenance': report_api.SECTIONS,
                 'study': self.server.startStudy,
+                # Provider names and the model each would use. No keys: the
+                # front end never needs one and must never be sent one.
+                'llm': {
+                    'available': [{'provider': name, 'model': model}
+                                  for name, _envVar, model in available],
+                    'wanted': [envVar for _, envVar, _ in study_runner.PROVIDERS],
+                },
             })
 
         if path == '/api/studies':
@@ -412,9 +460,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {'error': folderError})
             options['dest_pdfPath'] = folder
 
+            # And the provider, for the same reason: better refused now than
+            # after the analysis has run.
+            model, llmError, llmNote = resolveLlm(options)
+            if llmError:
+                return self._send(400, {'error': llmError})
+            if model:
+                options['llm_model'] = model
+
             sessionId = uuid.uuid4().hex[:12]
             SESSIONS[sessionId] = {'status': 'running', 'log': [], 'study': study,
                                    'report': None, 'overrides': {}, 'instance': None}
+            if llmNote:
+                SESSIONS[sessionId]['log'].append(llmNote + '\n')
+                print(llmNote)
             thread = threading.Thread(target=runAnalysis,
                                       args=(sessionId, study, options),
                                       daemon=True)

@@ -51,6 +51,46 @@ DEFAULTS = {
 }
 
 
+# Each provider, the environment variable its key lives in, and a default model
+# to use when a caller has not named one. Order is preference.
+PROVIDERS = (
+    ('openai', 'OPENAI_KEY', 'gpt-4o'),
+    ('anthropic', 'ANTHROPIC_API_KEY', 'claude-sonnet-4-5'),
+    ('google', 'GOOGLE_API_KEY', 'gemini-1.5-flash'),
+)
+
+
+def providerFor(llm_model):
+    """Which provider a model name belongs to, or None."""
+    model = (llm_model or '').lower()
+    if 'gpt' in model or model.startswith('o1') or model.startswith('o3'):
+        return 'openai'
+    if 'claude' in model:
+        return 'anthropic'
+    if 'gemini' in model:
+        return 'google'
+    return None
+
+
+def availableProviders():
+    """Providers with a usable key in config.env, as (name, envVar, model).
+
+    The review front end has no provider or model picker - the design brief put
+    that out of scope - so something has to choose, and choosing a provider
+    whose key is missing is how ticking the narrative option came to fail every
+    time with a complaint about GOOGLE_API_KEY.
+    """
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.env'))
+
+    out = []
+    for name, envVar, model in PROVIDERS:
+        key = os.environ.get(envVar)
+        if key and not key.startswith('REPLACE_WITH'):
+            out.append((name, envVar, model))
+    return out
+
+
 def resolveApiKey(llm_model):
     """The API key matching the requested model, from config.env.
 
