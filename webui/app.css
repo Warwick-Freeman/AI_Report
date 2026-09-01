@@ -1,0 +1,197 @@
+/* Palette taken verbatim from the design prototype, both themes.
+   Everything else here is that design's inline styles turned into classes. */
+:root{
+  --p-canvas:#0A121B; --p-surface:#101C29; --p-raised:#17293A; --p-sunken:#070E15;
+  --p-text-primary:#E6EDF4; --p-text-secondary:#9BB0C4; --p-text-disabled:#61798F;
+  --p-border-subtle:#1D3143; --p-border-strong:#33526C;
+  --p-accent:#3FBBEF; --p-accent-quiet:#12384f; --p-focus:rgba(0,163,224,.55);
+  --p-prov-measured:#4FC3F0; --p-prov-model:#FFB347; --p-prov-human:#35C6C4;
+  --p-prov-measured-bg:rgba(79,195,240,.10); --p-prov-model-bg:rgba(255,179,71,.10); --p-prov-human-bg:rgba(53,198,196,.10);
+  --p-success:#2FB6A8; --p-warning:#FF9E15; --p-error:#F2789F; --p-info:#4FC3F0;
+  --p-band:#22394d;
+  --p-notice-bg:#FF9E15; --p-notice-fg:#231F20; --p-notice-rule:#231F20;
+  color-scheme:dark;
+}
+:root[data-theme="light"],[data-theme="light"]{
+  --p-canvas:#F2F5F8; --p-surface:#FFFFFF; --p-raised:#FFFFFF; --p-sunken:#E7ECF2;
+  --p-text-primary:#231F20; --p-text-secondary:#5C6B78; --p-text-disabled:#98A6B2;
+  --p-border-subtle:#DEE3EB; --p-border-strong:#99B1C6;
+  --p-accent:#00A3E0; --p-accent-quiet:#E6F6FC; --p-focus:rgba(0,163,224,.45);
+  --p-prov-measured:#2383C5; --p-prov-model:#A85D00; --p-prov-human:#007B84;
+  --p-prov-measured-bg:rgba(35,131,197,.08); --p-prov-model-bg:rgba(168,93,0,.08); --p-prov-human-bg:rgba(0,123,132,.08);
+  --p-success:#008583; --p-warning:#A85D00; --p-error:#B00060; --p-info:#2383C5;
+  --p-band:#E3E9EF;
+  --p-notice-bg:#FFEEDB; --p-notice-fg:#4A2A00; --p-notice-rule:#A85D00;
+  color-scheme:light;
+}
+
+/* Myriad Pro is the brand face but is not webfont-distributable, and this tool
+   must draw correctly with no network, so the stack stays local. */
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--p-canvas);color:var(--p-text-primary);
+  font-family:"Myriad Pro","Source Sans 3","Open Sans",Segoe UI,Helvetica,Arial,sans-serif;
+  font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
+  font-size:13px;line-height:1.45;
+}
+a{color:var(--p-accent);text-decoration:none}
+a:hover{color:var(--p-text-primary);text-decoration:underline}
+:focus-visible{outline:3px solid var(--p-focus);outline-offset:1px;border-radius:2px}
+button,input,select,textarea{font:inherit;font-variant-numeric:tabular-nums;color:inherit}
+
+#app{min-height:100vh;background:var(--p-canvas);display:flex;justify-content:center;padding:0}
+.shell{width:100%;max-width:1400px;background:var(--p-surface);display:flex;flex-direction:column;min-height:100vh}
+
+.notice{display:flex;align-items:center;gap:8px;padding:5px 14px;
+  background:var(--p-notice-bg);color:var(--p-notice-fg);
+  border-bottom:1px solid var(--p-notice-rule)}
+.notice-mark{width:8px;height:8px;background:var(--p-notice-rule);flex:none}
+.notice span{font-size:10.5px;letter-spacing:.06em;line-height:1.3;
+  font-weight:600;min-width:0}
+
+.studybar{padding:10px 16px;border-bottom:1px solid var(--p-border-subtle);
+  background:var(--p-raised);display:flex;flex-wrap:wrap;gap:4px 22px;align-items:baseline}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--p-text-secondary)}
+.fact{display:flex;flex-direction:column}
+.fact-k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--p-text-secondary)}
+.fact-v{font-size:12.5px}
+.studybar h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.spacer{flex:1}
+
+.body{display:flex;flex:1;align-items:stretch;min-height:0}
+.rail{width:220px;flex:none;border-right:1px solid var(--p-border-subtle);
+  background:var(--p-canvas);padding:8px 0;display:flex;flex-direction:column;gap:1px}
+.rail button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  padding:7px 12px;border:0;border-left:3px solid transparent;cursor:pointer;
+  background:transparent;color:var(--p-text-primary)}
+.rail button:hover{background:var(--p-accent-quiet)}
+.rail button[aria-current="true"]{background:var(--p-accent-quiet);border-left-color:var(--p-accent)}
+.rail button[data-excluded="true"]{color:var(--p-text-disabled)}
+.rail .num{font-size:10px;color:var(--p-text-disabled);width:16px;flex:none}
+.rail .label{flex:1;font-size:12.5px;line-height:1.25}
+.rail .badge{font-size:10px;padding:0 5px;border-radius:2px;color:var(--p-warning)}
+.rail button[data-excluded="true"] .badge{color:var(--p-text-disabled)}
+
+.main{flex:1;padding:16px 20px 26px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.main h1{margin:0;font-size:21px;font-weight:300;letter-spacing:-.01em;line-height:1.15}
+.job{margin:0;font-size:12.5px;color:var(--p-text-secondary);max-width:78ch}
+.head{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+h3.sub{margin:14px 0 2px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--p-text-secondary);font-weight:600}
+
+/* Provenance marks. Shape as well as colour: the distinction has to survive
+   both colour-blindness and a greyscale print of the screen. */
+.prov{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.prov i{width:9px;height:9px;flex:none;display:inline-block}
+.prov[data-kind="measured"] i{background:var(--p-prov-measured)}
+.prov[data-kind="model"] i{border:1.5px solid var(--p-prov-model);transform:rotate(45deg)}
+.prov[data-kind="human"] i{border-radius:50%;background:var(--p-prov-human);width:10px;height:10px}
+.prov[data-kind="none"] i{border:1.5px dashed var(--p-text-disabled);border-radius:50%;width:10px;height:10px}
+.prov span{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--p-text-secondary)}
+.tag-provisional{font-size:9px;letter-spacing:.07em;text-transform:uppercase;
+  border:1px dashed var(--p-border-strong);color:var(--p-text-secondary);
+  padding:0 4px;border-radius:2px;white-space:nowrap;margin-left:6px}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--p-text-secondary);font-weight:600;padding:6px 8px;
+  border-bottom:1px solid var(--p-border-strong);background:var(--p-sunken)}
+td{padding:7px 8px;border-bottom:1px solid var(--p-border-subtle);vertical-align:top}
+tbody tr:hover{background:var(--p-accent-quiet)}
+td.value{font-weight:600}
+.basis{display:block;font-size:11px;color:var(--p-text-secondary);margin-top:2px;line-height:1.35}
+.nowrap{white-space:nowrap}
+
+button.btn{padding:5px 12px;border-radius:2px;border:1px solid var(--p-border-strong);
+  cursor:pointer;font-size:12px;background:transparent;color:var(--p-text-primary)}
+button.btn:hover{background:var(--p-accent-quiet)}
+button.btn[data-primary]{background:var(--p-accent);border-color:var(--p-accent);color:#04121B;font-weight:600}
+button.btn[data-primary]:hover{filter:brightness(1.08)}
+button.btn:disabled{opacity:.45;cursor:not-allowed}
+button.mini{padding:2px 8px;font-size:11px;border-radius:2px;
+  border:1px solid var(--p-border-subtle);background:transparent;cursor:pointer}
+button.mini:hover{background:var(--p-accent-quiet)}
+button.mini[aria-pressed="true"]{background:var(--p-accent-quiet);border-color:var(--p-accent);color:var(--p-accent)}
+
+input[type=text],input[type=number],select,textarea{
+  background:var(--p-sunken);border:1px solid var(--p-border-subtle);border-radius:2px;
+  padding:4px 7px;font-size:12.5px;width:100%}
+textarea{min-height:150px;line-height:1.5;resize:vertical}
+label.field{display:flex;flex-direction:column;gap:3px;font-size:11px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--p-text-secondary);min-width:180px}
+label.check{display:flex;gap:7px;align-items:flex-start;font-size:12.5px;
+  text-transform:none;letter-spacing:0;color:var(--p-text-primary);cursor:pointer}
+label.check input{margin-top:2px;flex:none;width:auto}
+.grid{display:flex;flex-wrap:wrap;gap:12px 18px}
+
+.panel{border:1px solid var(--p-border-subtle);border-radius:4px;
+  background:var(--p-raised);padding:14px 16px}
+.panel.sunk{background:var(--p-sunken)}
+
+/* An empty section is never silent. 'Not analysed' and 'analysed, nothing
+   found' are different clinical answers and the screen says which. */
+.empty{border:1px dashed var(--p-border-strong);border-radius:4px;padding:22px 20px;
+  display:flex;flex-direction:column;gap:8px;background:var(--p-sunken)}
+.empty .kind{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--p-text-secondary)}
+.empty .title{font-size:15px;font-weight:600}
+.empty .why{font-size:12.5px;color:var(--p-text-secondary);max-width:70ch}
+.empty[data-kind="no-findings"]{border-color:var(--p-prov-measured)}
+.empty[data-kind="failed"]{border-color:var(--p-error)}
+.empty[data-kind="excluded"]{border-style:dotted}
+
+.note{font-size:12px;color:var(--p-text-secondary);border-left:2px solid var(--p-border-strong);
+  padding:2px 0 2px 10px;margin:5px 0;line-height:1.45}
+
+.statusbar{display:flex;align-items:center;gap:12px;padding:6px 16px;
+  border-top:1px solid var(--p-border-subtle);background:var(--p-sunken);
+  font-size:11.5px;color:var(--p-text-secondary);flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--p-text-disabled)}
+.dot[data-status="running"]{background:var(--p-warning)}
+.dot[data-status="ready"]{background:var(--p-success)}
+.dot[data-status="failed"]{background:var(--p-error)}
+
+pre.log{background:var(--p-sunken);border:1px solid var(--p-border-subtle);border-radius:3px;
+  padding:10px 12px;font-size:11px;line-height:1.45;max-height:420px;overflow:auto;
+  white-space:pre-wrap;word-break:break-word;font-family:Consolas,"Cascadia Mono",monospace;
+  color:var(--p-text-secondary)}
+
+ul.plain{margin:6px 0;padding-left:18px}
+ul.plain li{margin:3px 0}
+
+@media (max-width:860px){
+  .rail{width:100%;flex-direction:row;overflow-x:auto;border-right:0;
+    border-bottom:1px solid var(--p-border-subtle)}
+  .rail button{width:auto;white-space:nowrap;border-left:0;border-bottom:3px solid transparent}
+  .rail button[aria-current="true"]{border-left-color:transparent;border-bottom-color:var(--p-accent)}
+  .body{flex-direction:column}
+}
+
+/* Available to a screen reader, not on screen. The brief asks for screen-reader
+   semantics on the data tables; a caption is the natural place for a table's
+   name, and these tables already carry a visible heading above them. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+button.mini:disabled{opacity:.4;cursor:not-allowed}
+button.mini:disabled:hover{background:transparent}
+
+/* Wide content scrolls in its own box so the page never scrolls sideways -
+   which at 420 px would carry the rail and the regulatory notice off screen. */
+.tablewrap{overflow-x:auto;max-width:100%}
+.tablewrap table{min-width:520px}
+.main{min-width:0}
+
+/* The narrow dock. The brief asks for 420 px usable, and at that width the
+   study bar's facts, the section title and its actions cannot share a row.
+   They stack instead of being clipped: a control pushed past the edge is worse
+   than one on the next line. */
+@media (max-width:600px){
+  .studybar{gap:6px 14px}
+  .studybar .spacer{display:none;flex:none}
+  .studybar .head-actions{width:100%}
+  .head{flex-direction:column;align-items:stretch}
+  .head .head-actions{width:100%}
+  .main{padding:14px 12px 22px}
+  .notice{padding:5px 12px}
+}

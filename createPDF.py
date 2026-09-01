@@ -95,7 +95,16 @@ class writePDF:
 
         # First, the way a SCORE report opens: who was recorded and under what
         # conditions, before any finding.
-        self.writeRecordingPage(pdf, fontName, line_height, results.get('recording'))
+        # Sections the reader excluded in the review front end. The results are
+        # kept - they still go to the structured SCORE data - but the section is
+        # left out of the document, which is what excluding it means.
+        excluded = set(results.get('_excluded') or ())
+
+        def wanted(sectionId, value):
+            return None if sectionId in excluded else value
+
+        self.writeRecordingPage(pdf, fontName, line_height,
+                                wanted('recording', results.get('recording')))
 
         pdf.add_page(orientation = 'P')
         # set page horizontal
@@ -295,13 +304,13 @@ class writePDF:
         # 標題
         pdf.cell(0, 20, text='Spectrogram', ln=1, align='C')
         self._placeImage(pdf, self.dest_folder + 'eeg4.jpg', top=25)
-        self.writePdrPage(pdf, fontName, line_height, results.get('pdr'))
-        self.writeInterictalPage(pdf, fontName, line_height, results.get('interictal'))
-        self.writeEpisodesPage(pdf, fontName, line_height, (results.get('spikeseizure') or {}).get('episodes'))
-        self.writeSleepPage(pdf, fontName, line_height, results.get('sleep'))
-        self.writeArtifactPage(pdf, fontName, line_height, results.get('artifacts'))
-        self.writeConclusionPage(pdf, fontName, line_height, results.get('conclusion'))
-        self.writeAiPage(pdf, fontName, line_height, results.get('conclusion'))
+        self.writePdrPage(pdf, fontName, line_height, wanted('pdr', results.get('pdr')))
+        self.writeInterictalPage(pdf, fontName, line_height, wanted('interictal', results.get('interictal')))
+        self.writeEpisodesPage(pdf, fontName, line_height, wanted('episodes', (results.get('spikeseizure') or {}).get('episodes')))
+        self.writeSleepPage(pdf, fontName, line_height, wanted('sleep', results.get('sleep')))
+        self.writeArtifactPage(pdf, fontName, line_height, wanted('artifacts', results.get('artifacts')))
+        self.writeConclusionPage(pdf, fontName, line_height, wanted('conclusion', results.get('conclusion')))
+        self.writeAiPage(pdf, fontName, line_height, wanted('conclusion', results.get('conclusion')))
 
         outFile=self.dest_folder+self.fileName.split('.')[0]+'.pdf'
         pdf.output(outFile)
@@ -389,6 +398,25 @@ class writePDF:
             for note in notes:
                 pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
                 pdf.set_x(pdf.l_margin)
+
+        # Anything the reader changed, named. The measurement table earlier in
+        # the report is unchanged - it reports what was measured - so without
+        # this a reader would find two different numbers for one property and
+        # nothing to explain the difference.
+        overridden = [(key, entry) for key, entry in (pdrResult or {}).items()
+                      if isinstance(entry, dict) and entry.get('overridden')]
+        if overridden:
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            self._row(pdf, [('Overridden by the reader', 196)], line_height - 1)
+            pdf.set_font(fontName, size=9)
+            for key, entry in overridden:
+                self._subLine(pdf, fontName,
+                              '%s: reported as %s; measured %s'
+                              % (key.replace('_', ' '), entry.get('term'),
+                                 entry.get('measured_term')),
+                              4, line_height - 3.5)
+            pdf.set_font(fontName, size=9)
 
     def writeConclusionPage(self, pdf, fontName, line_height, conclusion):
         """SCORE sections 15 and 17: diagnostic significance, summary, comments.

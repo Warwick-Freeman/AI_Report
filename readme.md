@@ -435,6 +435,106 @@ Two options apply only to this format:
 ProfusionEEG events (spikes, photic, bookmarks, and so on) are carried across as MNE
 annotations.
 
+### Report review front end
+
+`Start-StudyBrowser.ps1` and `batch_report.py` run the whole analysis unattended
+and write a document. The review front end does the other thing: it runs the
+analysis once, shows every finding with where it came from, and produces the
+document only after a reader has accepted, overridden or excluded what is in it.
+
+```powershell
+.\Start-ReportUI.ps1
+.\Start-ReportUI.ps1 -Study 'C:\Studies\Patient.eeg'
+```
+
+The study browser opens it too, through **Review in report UI...**, which hands
+over the selected study.
+
+It is a local web page served by `report_server.py` on the loopback address.
+Nothing leaves the machine and the page loads no script from any network, so it
+works offline. Ported from the Claude Design prototype in
+`Dark theme and first pass screens/`, which rendered through a design-compiler
+runtime that pulls React, ReactDOM and Babel from unpkg at load - right for a
+design preview, wrong for a clinical tool that must draw a screen with the
+network down. The palette is that design's, verbatim, in both themes.
+
+#### Provenance
+
+The point of the front end, and the reason it is worth having at all: every
+value shows where it came from, and the mark is declared per field from what the
+analysis actually did rather than guessed from the wording of a basis string.
+
+| Mark | Meaning |
+| --- | --- |
+| **Measured** | A deterministic measurement of the signal. The same recording gives the same number. |
+| **Model - unverified** | The output of a trained model. Reproducible, but wrong in ways the number does not show. |
+| **Human-scored** | Entered or overridden by the electroencephalographer. |
+| **Not scored** | Not scored, or not possible to determine. SCORE separates this from a negative finding, and so does this. |
+
+Each is a different shape as well as a different colour, so the distinction
+survives greyscale and colour-vision deficiency.
+
+The PDR frequency pair is marked *model* because it comes from the
+CNN/GoogleNet/ResNet ensemble, however confident it reads; the other seven
+properties are measured. Sleep staging and spike/seizure detections are model
+output. Diagnostic significance and the conclusion are human-scored and nothing
+in the analysis writes them.
+
+An override changes the mark to *human*, because it is now a human's value. The
+measurement is kept beside it and the document names what was changed:
+
+```
+Frequency  9.5 Hz  high  9.2
+  overridden by the reader; measured 9.2 Hz (model ensemble, left 9.2 / right 9.2 Hz)
+...
+Overridden by the reader
+  frequency: reported as 9.5 Hz; measured 9.2 Hz
+```
+
+Without that the report would state 9.5 Hz on the PDR page and 9.2 Hz on the
+measurement page with nothing to explain the difference.
+
+#### Refusing to overreach
+
+The diagnostic-yield picker offers SCORE's whole list and disables what this
+analysis cannot argue, with the reason beside it:
+
+```
+Epilepsy                                    Unavailable   needs epileptiform findings, and none were detected
+Status epilepticus                          Unavailable   needs ictal pattern detection, which is not implemented
+Focal dysfunction of the central nervous..  Select
+Diffuse dysfunction of the central nerv..   Select
+Coma                                        Unavailable   needs the clinical state, which the signal alone does not give
+```
+
+Hiding them would teach a reader nothing. Supportability is recomputed from the
+findings actually present - once the spike and seizure detector supplies
+epileptiform findings, `Epilepsy` becomes available, because the reason for
+withholding it no longer holds.
+
+Empty sections say which kind of empty they are. *Not analysed* and *analysed,
+nothing found* are different clinical answers and the screen never blurs them.
+
+#### Two artefacts
+
+Generation writes the report document and, beside it,
+`<study>.score.json` - the same report as structured data, carrying every
+value's provenance and the reader's overrides.
+
+#### What it does not do yet
+
+- The document is the existing PDF. The brief asks for a **.docx** from a Word
+  template; that is not built.
+- Drafts are not saved. A session lives in the server's memory: a reload keeps
+  it (the session is in the URL) but restarting the server loses it.
+- **Add finding (human-scored)** on Interictal, and the per-episode semiology
+  and ILAE fields, are shown as the reader's to supply but are not editable
+  here - the Episodes page lists them and leaves them blank.
+- UI strings are not externalised, so the language selector the brief describes
+  is absent rather than present-and-disabled.
+- Jump-to-time back into the Profusion waveform view needs the host
+  application and does nothing standalone.
+
 #### Study browser (GUI)
 
 A folder of ProfusionEEG studies carries a `_CMPStudyList.mdb` index at its root.

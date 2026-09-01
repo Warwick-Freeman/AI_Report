@@ -612,17 +612,47 @@ class CreateReport:
         self.results=results
         self.genFinalResults()
 
-        if self.outputPdf:  
-            ai_report_text=None
-            if self.aiReport:          
-                ai_report_text=self.AI_Text_generate()
-                try:
-                    results['conclusion']=self.scoreConclusion()
-                except Exception as e:
-                    print('Conclusion generation failed: %s' % e)
-            writePDF(self.fileName, rawData, epochs, psds, results,self.dest_pdfPath, sample_rate, raw.ch_names, ai_report_text)
+        # What writePDF needs, kept so the document can be written later from an
+        # analysis that has already run. The review front end depends on this:
+        # the reader accepts and overrides findings, and only then is the
+        # document produced - re-running the analysis to write it would cost
+        # minutes and could not honour the review anyway.
+        #
+        # This holds the epoch data for the life of the object, which for a long
+        # recording is not free. The command-line path writes immediately below
+        # and lets it go.
+        self._documentInputs = {
+            'rawData': rawData, 'epochs': epochs, 'psds': psds,
+            'sample_rate': sample_rate, 'ch_names': raw.ch_names,
+        }
+
+        if self.outputPdf:
+            self.writeDocument()
 
         return raw, results
+
+    def writeDocument(self):
+        """Write the report document from the analysis already in memory.
+
+        Called by process() on the command-line path, and by the review front
+        end once the reader has finished with the findings.
+        """
+        if not getattr(self, '_documentInputs', None):
+            raise RuntimeError('nothing analysed yet - call process() first')
+
+        results = self.results
+        ai_report_text = None
+        if self.aiReport:
+            ai_report_text = self.AI_Text_generate()
+            try:
+                results['conclusion'] = self.scoreConclusion()
+            except Exception as e:
+                print('Conclusion generation failed: %s' % e)
+
+        inputs = self._documentInputs
+        writePDF(self.fileName, inputs['rawData'], inputs['epochs'],
+                 inputs['psds'], results, self.dest_pdfPath,
+                 inputs['sample_rate'], inputs['ch_names'], ai_report_text)
     
 
 

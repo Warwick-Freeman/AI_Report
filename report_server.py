@@ -1,0 +1,445 @@
+############################################
+# Local server for the report review front end.
+#
+# Serves webui/ and a small JSON API over the existing analysis. Nothing leaves
+# the machine: it binds to the loopback address only, and the front end loads no
+# script from any network.
+#
+# The analysis runs once, in a worker thread, and the CreateReport instance
+# stays in memory afterwards. That is the whole reason this is a server rather
+# than the subprocess the study browser uses: the reader reviews the findings
+# and then generates the document from the same analysis, instead of paying for
+# it twice. A session is abandoned rather than killed - the thread is left to
+# finish into a result nobody reads.
+#
+#   python report_server.py                    serve and open a browser
+#   python report_server.py --study <path>     and start on that study
+#   python report_server.py --no-browser --port 8731
+############################################
+import os
+
+# Before anything can import pyplot. The analysis and the document both draw
+# figures, and they draw them on a worker thread; an interactive backend
+# segfaults the process when it is driven from off the main thread. Agg has no
+# event loop and no window, which is what a server wants.
+os.environ.setdefault('MPLBACKEND', 'Agg')
+
+import argparse
+import io
+import json
+import mimetypes
+import threading
+import traceback
+import uuid
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import report_api
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEBUI = os.path.join(HERE, 'webui')
+
+# Sessions live for the life of the process. Reports are small; the analysis
+# behind them is not, which is why they are kept.
+SESSIONS = {}
+LOCK = threading.Lock()
+
+
+class Tee(io.TextIOBase):
+    """Captures the analysis log while leaving it on the console."""
+
+    def __init__(self, session, stream):
+        self.session = session
+        self.stream = stream
+
+    def write(self, text):
+        if text:
+            with LOCK:
+                self.session['log'].append(text)
+                # A long analysis prints a lot; the front end only shows a tail.
+                if len(self.session['log']) > 4000:
+                    del self.session['log'][:2000]
+        try:
+            return self.stream.write(text)
+        except Exception:
+            return len(text)
+
+    def flush(self):
+        try:
+            self.stream.flush()
+        except Exception:
+            pass
+
+
+def runAnalysis(sessionId, study, options):
+    """Analyse one study, then leave the instance available for generation."""
+    import contextlib
+    import sys
+
+    session = SESSIONS[sessionId]
+    tee = Tee(session, sys.__stdout__)
+    try:
+        with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
+            from auto_report import CreateReport
+            import study_runner
+
+            filePath, fileName = os.path.split(study.rstrip('/\\'))
+            if not filePath:
+                filePath = '.'
+
+            apiKey, keyError = study_runner.resolveApiKey(options.get('llm_model'))
+            if options.get('aiReport') and not apiKey:
+                raise RuntimeError('AI report requested but %s' % keyError)
+
+            report = CreateReport(
+                fileName, filePath,
+                LLM_API_KEY=apiKey or '',
+                llm_model=options.get('llm_model') or 'gemini-1.5-flash',
+                dest_pdfPath=options.get('dest_pdfPath') or './reports',
+                autogenerate=False,
+                outputPdf=False,
+                aiReport=bool(options.get('aiReport')),
+                reportLang=options.get('reportLang') or 'english',
+                useRepair=options.get('useRepair', True),
+                unit_uV=options.get('unit_uV', True),
+                dropEpochSD=options.get('dropEpochSD', 2.2),
+                removeEpochsRationThreshold=options.get(
+                    'removeEpochsRationThreshold', 0.3),
+                renameChannels=options.get('renameChannels', True),
+                tmin=options.get('tmin'), tmax=options.get('tmax'),
+                profusionSegment=options.get('profusionSegment') or 'longest',
+                profusionMaxSeconds=options.get('profusionMaxSeconds'),
+                patientDob=study_runner.parseDob(options.get('patientDob')),
+                patientAge=options.get('patientAge'),
+                autoEyeState=bool(options.get('autoEyeState')),
+                stageSleep=bool(options.get('stageSleep', True)),
+                sleepBackend=options.get('sleepBackend') or 'usleep',
+                spikeTypeIds=options.get('spikeTypeIds'))
+
+            raw, results = report.process()
+            report.raw = raw
+
+            with LOCK:
+                session['instance'] = report
+                session['report'] = report_api.buildReport(results, study, options)
+                session['status'] = 'ready'
+    except Exception as e:
+        with LOCK:
+            session['status'] = 'failed'
+            session['error'] = '%s: %s' % (type(e).__name__, e)
+            session['traceback'] = traceback.format_exc()
+        try:
+            tee.write('\nANALYSIS FAILED\n%s\n' % traceback.format_exc())
+        except Exception:
+            pass
+
+
+# matplotlib keeps global state, so two documents drawn at once would draw into
+# each other. One at a time.
+DRAW = threading.Lock()
+
+
+def generateDocument(sessionId):
+    """Write the document from the analysis in memory, as the reader left it."""
+    import contextlib
+    import sys
+
+    session = SESSIONS[sessionId]
+    instance = session.get('instance')
+    if instance is None:
+        raise RuntimeError('nothing analysed in this session')
+
+    applied = report_api.applyOverrides(session['report'], session.get('overrides'))
+    session['report'] = applied
+    applyToResults(instance.results, applied)
+
+    tee = Tee(session, sys.__stdout__)
+    try:
+        with DRAW, contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
+            instance.outputPdf = True
+            instance.writeDocument()
+        stem = os.path.splitext(instance.fileName)[0]
+        pdf = os.path.join(instance.dest_pdfPath, stem + '.pdf')
+        pdf = os.path.abspath(pdf) if os.path.isfile(pdf) else None
+
+        # The structured SCORE data file, written beside the document. The
+        # document is for a person; this is the same report as data, carrying
+        # the provenance of every value and the reader's overrides - which the
+        # document states but cannot be queried for.
+        data = None
+        try:
+            data = os.path.abspath(os.path.join(instance.dest_pdfPath,
+                                                stem + '.score.json'))
+            report_api.save(applied, data)
+        except OSError as e:
+            tee.write('Could not write the SCORE data file: %s\n' % e)
+            data = None
+
+        with LOCK:
+            session['pdf'] = pdf
+            session['data'] = data
+            session['status'] = 'ready'
+            if not pdf:
+                session['error'] = 'no document was written'
+    except Exception as e:
+        with LOCK:
+            session['status'] = 'ready'
+            session['error'] = 'document generation failed: %s: %s' % (
+                type(e).__name__, e)
+        tee.write('\nDOCUMENT GENERATION FAILED\n%s\n' % traceback.format_exc())
+
+
+def applyToResults(results, report):
+    """Fold the reader's decisions back into the results the PDF is built from.
+
+    Without this the review would be decorative: the reader would accept and
+    override values that the document then ignored.
+    """
+    if not results:
+        return
+    excluded = set()
+    for section in report.get('sections') or []:
+        if not section.get('included', True):
+            excluded.add(section['id'])
+            continue
+        if section['id'] == 'pdr' and results.get('pdr'):
+            for row in section.get('rows') or []:
+                key = row['id'][4:] if row['id'].startswith('pdr_') else None
+                if key and row.get('override') and key in results['pdr']:
+                    entry = results['pdr'][key]
+                    # The measurement is kept, not replaced. A reader's scored
+                    # value and the number measured off the signal are different
+                    # things, and a document that shows only the override leaves
+                    # no way to see what was changed - or to explain why the
+                    # measurement table earlier in the report says something
+                    # else. Both are stated, and which is which.
+                    original = entry.get('term')
+                    originalBasis = entry.get('basis') or ''
+                    entry['term'] = row['override']
+                    entry['basis'] = ('overridden by the reader; measured %s%s'
+                                      % (original,
+                                         ' (%s)' % originalBasis if originalBasis else ''))
+                    entry['measured_term'] = original
+                    entry['overridden'] = True
+                    entry['provisional'] = False
+        if section['id'] in ('interictal', 'artifacts'):
+            block = results.get(section['id'])
+            keep = {f['name'] for f in section.get('findings') or []
+                    if f.get('included', True)}
+            if block and block.get('findings'):
+                block['findings'] = [f for f in block['findings']
+                                     if f.get('name') in keep]
+        if section['id'] == 'episodes' and results.get('spikeseizure'):
+            keep = {f['name'] for f in section.get('findings') or []
+                    if f.get('included', True)}
+            episodes = results['spikeseizure'].get('episodes') or []
+            results['spikeseizure']['episodes'] = [
+                e for e in episodes if e.get('name') in keep]
+        if section['id'] == 'conclusion':
+            values = {row['id']: row.get('override') or row.get('value')
+                      for row in section.get('rows') or []}
+            conclusion = results.get('conclusion') or {}
+            if values.get('significance'):
+                conclusion['significance'] = values['significance']
+            if values.get('yield'):
+                conclusion['yield'] = values['yield']
+            results['conclusion'] = conclusion
+    # createPDF skips these pages.
+    results['_excluded'] = sorted(excluded)
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'SCOREReportUI'
+
+    def log_message(self, fmt, *args):
+        pass  # the analysis log is the interesting one
+
+    # ------------------------------------------------------------- plumbing
+    def _send(self, code, body, contentType='application/json'):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, default=str).encode('utf-8')
+        elif isinstance(body, str):
+            body = body.encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', contentType)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError):
+            pass
+
+    def _body(self):
+        length = int(self.headers.get('Content-Length') or 0)
+        if not length:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length).decode('utf-8'))
+        except ValueError:
+            return {}
+
+    def _static(self, path):
+        relative = path.lstrip('/') or 'index.html'
+        full = os.path.normpath(os.path.join(WEBUI, relative))
+        if not full.startswith(WEBUI) or not os.path.isfile(full):
+            return self._send(404, {'error': 'not found'})
+        kind = mimetypes.guess_type(full)[0] or 'application/octet-stream'
+        with open(full, 'rb') as f:
+            self._send(200, f.read(), kind)
+
+    # ------------------------------------------------------------------ GET
+    def do_GET(self):
+        path = self.path.split('?')[0]
+        query = {}
+        if '?' in self.path:
+            from urllib.parse import parse_qs, unquote
+            query = {k: unquote(v[0]) for k, v in
+                     parse_qs(self.path.split('?', 1)[1]).items()}
+
+        if not path.startswith('/api/'):
+            return self._static(path)
+
+        if path == '/api/config':
+            import study_runner
+            return self._send(200, {
+                'defaults': study_runner.DEFAULTS,
+                'provenance': report_api.SECTIONS,
+                'study': self.server.startStudy,
+            })
+
+        if path == '/api/studies':
+            return self._send(200, self._studies(query.get('root')))
+
+        if path.startswith('/api/session/'):
+            parts = path.split('/')
+            sessionId = parts[3]
+            session = SESSIONS.get(sessionId)
+            if not session:
+                return self._send(404, {'error': 'no such session'})
+            tail = parts[4] if len(parts) > 4 else ''
+            with LOCK:
+                logText = ''.join(session['log'][-400:])
+            if tail == 'log':
+                return self._send(200, {'log': logText,
+                                        'status': session['status']})
+            payload = {
+                'id': sessionId,
+                'status': session['status'],
+                'error': session.get('error'),
+                'log': logText,
+                'study': session['study'],
+                'pdf': session.get('pdf'),
+                'data': session.get('data'),
+            }
+            if session.get('report'):
+                report = report_api.applyOverrides(session['report'],
+                                                   session.get('overrides'))
+                payload['report'] = report
+                payload['outstanding'] = report_api.outstandingTotal(report)
+            return self._send(200, payload)
+
+        return self._send(404, {'error': 'unknown endpoint'})
+
+    def _studies(self, root):
+        """Studies under a folder, via the study list where there is one."""
+        if not root or not os.path.isdir(root):
+            return {'root': root, 'studies': [], 'error': 'folder not found'}
+        try:
+            import studylist
+            found = studylist.loadStudies(root)
+            return {'root': root, 'studies': [report_api._clean(s) for s in found]}
+        except Exception as e:
+            return {'root': root, 'studies': [], 'error': str(e)}
+
+    # ----------------------------------------------------------------- POST
+    def do_POST(self):
+        path = self.path.split('?')[0]
+        body = self._body()
+
+        if path == '/api/analyse':
+            study = (body.get('study') or '').strip()
+            if not (os.path.isdir(study) or os.path.isfile(study)):
+                return self._send(400, {'error': 'study not found: %s' % study})
+            sessionId = uuid.uuid4().hex[:12]
+            SESSIONS[sessionId] = {'status': 'running', 'log': [], 'study': study,
+                                   'report': None, 'overrides': {}, 'instance': None}
+            thread = threading.Thread(target=runAnalysis,
+                                      args=(sessionId, study, body.get('options') or {}),
+                                      daemon=True)
+            thread.start()
+            return self._send(200, {'id': sessionId, 'status': 'running'})
+
+        if path.startswith('/api/session/'):
+            parts = path.split('/')
+            sessionId = parts[3]
+            session = SESSIONS.get(sessionId)
+            if not session:
+                return self._send(404, {'error': 'no such session'})
+            action = parts[4] if len(parts) > 4 else ''
+
+            if action == 'overrides':
+                with LOCK:
+                    overrides = session.setdefault('overrides', {})
+                    for sectionId, edits in (body or {}).items():
+                        overrides.setdefault(sectionId, {}).update(edits)
+                report = report_api.applyOverrides(session['report'],
+                                                   session['overrides'])
+                return self._send(200, {'ok': True,
+                                        'outstanding': report_api.outstandingTotal(report)})
+
+            if action == 'generate':
+                if session['status'] != 'ready':
+                    return self._send(409, {'error': 'analysis is %s' % session['status']})
+                with LOCK:
+                    session['status'] = 'generating'
+                    session['error'] = None
+                    session['pdf'] = None
+                threading.Thread(target=generateDocument, args=(sessionId,),
+                                 daemon=True).start()
+                return self._send(202, {'status': 'generating'})
+
+            if action == 'open':
+                target = session.get('pdf')
+                if not target or not os.path.isfile(target):
+                    return self._send(404, {'error': 'no document yet'})
+                try:
+                    os.startfile(target)  # noqa: S606 - Windows shell open
+                except AttributeError:
+                    webbrowser.open('file:///%s' % target.replace('\\', '/'))
+                return self._send(200, {'ok': True})
+
+        return self._send(404, {'error': 'unknown endpoint'})
+
+
+def serve(port=8731, study=None, openBrowser=True):
+    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server.startStudy = study
+    url = 'http://127.0.0.1:%d/' % server.server_address[1]
+    print('SCORE report review front end')
+    print('  %s' % url)
+    print('  serving %s' % WEBUI)
+    if study:
+        print('  study  %s' % study)
+    print('  Ctrl+C to stop')
+    if openBrowser:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print('\nstopped')
+    finally:
+        server.server_close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port', type=int, default=8731)
+    parser.add_argument('--study', help='study to open on start')
+    parser.add_argument('--no-browser', action='store_true')
+    args = parser.parse_args()
+    serve(args.port, args.study, not args.no_browser)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

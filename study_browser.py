@@ -79,6 +79,11 @@ class StudyBrowser(QMainWindow):
         self.studies = []
         self.process = None
         self.reportPdf = None
+        # The review front end, started detached by openReviewUI. Kept so a
+        # second click reuses the running server instead of colliding on the
+        # port it is already bound to.
+        self.reviewPid = None
+        self.reviewPort = 8731
 
         self._buildUi()
         self._restoreOptions()
@@ -155,6 +160,19 @@ class StudyBrowser(QMainWindow):
         self.openButton.clicked.connect(self.openReport)
         self.openButton.setEnabled(False)
         actions.addWidget(self.openButton)
+
+        # The review front end. 'Generate report' runs the whole thing
+        # unattended and writes a document; this hands the study to the review
+        # UI instead, where the reader works through the SCORE sections, accepts
+        # or overrides each value, and only then generates. Both routes run the
+        # same analysis.
+        self.reviewButton = QPushButton('Review in report UI...')
+        self.reviewButton.setToolTip(
+            'Open the study in the SCORE review front end, where findings can '
+            'be accepted, overridden or excluded before the document is written.')
+        self.reviewButton.clicked.connect(self.openReviewUI)
+        self.reviewButton.setEnabled(False)
+        actions.addWidget(self.reviewButton)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
@@ -435,10 +453,54 @@ class StudyBrowser(QMainWindow):
 
     def _selectionChanged(self):
         study = self.selectedStudy()
-        self.generateButton.setEnabled(
-            bool(study) and study.get('exists', False) and self.process is None)
+        usable = bool(study) and study.get('exists', False)
+        self.generateButton.setEnabled(usable and self.process is None)
+        # The review UI runs its own analysis in its own process, so it does not
+        # care whether a batch run is in progress here.
+        self.reviewButton.setEnabled(usable)
 
-    # ------------------------------------------------------------- options
+    def openReviewUI(self):
+        """Hand the selected study to the review front end.
+
+        The server is started detached and outlives this window on purpose: it
+        holds the analysis in memory so the reader can review the findings and
+        then generate the document without paying for the analysis twice. It is
+        a console process the reader closes when finished.
+        """
+        study = self.selectedStudy()
+        if not study:
+            return
+        path = study.get('path')
+        if not path or not os.path.exists(path):
+            QMessageBox.warning(self, 'Study not found',
+                                'The selected study is not on disk:' + chr(10) + path)
+            return
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        server = os.path.join(here, 'report_server.py')
+        if not os.path.isfile(server):
+            QMessageBox.warning(self, 'Front end missing',
+                                'report_server.py is not in %s' % here)
+            return
+
+        url = QUrl('http://127.0.0.1:%d/' % self.reviewPort)
+        if self.reviewPid:
+            # Already serving. Point the browser at it rather than starting a
+            # second server, which would fail to bind the port.
+            QDesktopServices.openUrl(url)
+            return
+
+        started, pid = QProcess.startDetached(
+            sys.executable,
+            [server, '--port', str(self.reviewPort), '--study', path], here)
+        if not started:
+            QMessageBox.critical(self, 'Could not start the front end',
+                                 'Failed to launch %s' % server)
+            return
+        self.reviewPid = pid
+        self.statusBar().showMessage(
+            'Review front end serving on %s - it opens a console window; close '
+            'that when finished' % url.toString(), 15000)
 
     def _aiToggled(self):
         """Show whether the selected model has a usable key in config.env."""
