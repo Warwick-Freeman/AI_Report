@@ -665,19 +665,19 @@ studies can never write over each other's.
 
 | Study | Outputs |
 | --- | --- |
-| A ProfusionEEG study (a folder) |  |
+| A ProfusionEEG study (a folder) | `<study>.eeg/Report/` |
 | A single file (EDF) | beside the file, names prefixed with its stem |
 
 A ProfusionEEG study gets a **subfolder**, not the study root. The root belongs
-to ProfusionEEG - , , the montages, the 
+to ProfusionEEG - `EEGData`, `EEGStudyDB.mdb`, the montages, the `.sdy`
 descriptor - and loose report files among them invite a tidy-up that matches on
-the study's name and takes a study file with it. That is not hypothetical: it
-is how three of the demo studies lost their  descriptors during
-development, because a descriptor can share the study's stem.
+the study's name and takes a study file with it. That is not hypothetical: it is
+how three of the demo studies lost their `.sdy` descriptors during development,
+because a descriptor can share the study's stem.
 
 Give an explicit output folder and it is used as-is, so everything can still be
-collected in one place: the **Output folder** field in the front end,  for
-,  in an options file.
+collected in one place: the **Output folder** field in the front end, `--out`
+for `batch_report.py`, `dest_pdfPath` in an options file.
 
 #### Two artefacts
 
