@@ -137,8 +137,9 @@ class CreateReport:
     }
 
     alphaEpochs=None
-    def __init__(self, fileName, filePath, LLM_API_KEY='', dest_pdfPath='./',  
+    def __init__(self, fileName, filePath, LLM_API_KEY='', dest_pdfPath='',  
                  autogenerate=True, outputPdf=False, aiReport=False, reportLang='English',
+                 # '' or 'study' puts every output in the study's own folder.
                  llm_model='gemini-1.5-pro',
                  model_folder='./models/',
                  model_names=['CNN', 'GoogleNet','ResNet'], useRepair=True, unit_uV=True,
@@ -161,7 +162,11 @@ class CreateReport:
                 filePath += '\\'
         self.unit_uV=unit_uV
         self.eegFullName=filePath+fileName
-        self.dest_pdfPath=dest_pdfPath
+        # Resolved here so every caller gets it: an empty destination, or
+        # 'study', means the study's own folder. Doing it at this one point
+        # covers the runner, the batch, the review front end and direct use.
+        self.dest_pdfPath=profusion.resolveOutputFolder(dest_pdfPath,
+                                                        self.eegFullName)
         self.model_folder=model_folder
         self.fileName=fileName
         self.filePath=filePath

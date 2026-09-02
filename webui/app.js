@@ -364,7 +364,11 @@ function renderHome() {
     '<input type="text" id="studyPath" value="' + esc(S.study) + '" ' +
     'placeholder="C:\\Studies\\Patient.eeg  or  sample_data\\01RT.edf"></label>' +
     '<label class="field"><span>Output folder</span>' +
-    '<input type="text" data-opt="dest_pdfPath" value="' + esc(o.dest_pdfPath || './reports') + '"></label>' +
+    '<input type="text" data-opt="dest_pdfPath" value="' +
+    esc(o.dest_pdfPath || '') + '" placeholder="the study\'s own folder">' +
+    '<span class="basis">Blank puts the report, the figures and the saved ' +
+    'analysis in the study\'s own folder, so they travel with it. Give a path ' +
+    'to collect every report in one place instead.</span></label>' +
     '</div></div>';
 
   html += '<div class="panel"><h3 class="sub">Analyses to run</h3><div class="grid">' +

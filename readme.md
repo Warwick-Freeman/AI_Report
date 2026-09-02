@@ -656,6 +656,29 @@ first one's figures into it.
 If the figures are gone the analysis still loads and can be reviewed, and the
 Generate screen says why a document cannot be written from it.
 
+#### Where the outputs go
+
+Everything one analysis produces - the figures, the saved analysis, the
+structured SCORE data and the document - goes with the recording rather than
+into a shared reports folder, so a study's outputs travel with it and two
+studies can never write over each other's.
+
+| Study | Outputs |
+| --- | --- |
+| A ProfusionEEG study (a folder) |  |
+| A single file (EDF) | beside the file, names prefixed with its stem |
+
+A ProfusionEEG study gets a **subfolder**, not the study root. The root belongs
+to ProfusionEEG - , , the montages, the 
+descriptor - and loose report files among them invite a tidy-up that matches on
+the study's name and takes a study file with it. That is not hypothetical: it
+is how three of the demo studies lost their  descriptors during
+development, because a descriptor can share the study's stem.
+
+Give an explicit output folder and it is used as-is, so everything can still be
+collected in one place: the **Output folder** field in the front end,  for
+,  in an options file.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,

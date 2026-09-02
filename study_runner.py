@@ -27,7 +27,10 @@ DEFAULTS = {
     'aiReport': False,
     'reportLang': 'english',
     'llm_model': 'gemini-1.5-flash',
-    'dest_pdfPath': './reports',
+    # Where the report, the figures and the saved analysis go. Empty means the
+    # study's own folder, so a study's outputs travel with it; give a path to
+    # collect everything in one place instead.
+    'dest_pdfPath': '',
     'useRepair': True,
     'unit_uV': True,
     'dropEpochSD': 2.2,
@@ -157,6 +160,9 @@ def run(options):
         # Only worth a note: the analysis and the PDF do not need a provider.
         print('Note: %s (not needed - AI report is off)' % keyError)
 
+    import profusion
+    options['dest_pdfPath'] = profusion.resolveOutputFolder(
+        options['dest_pdfPath'], study)
     os.makedirs(options['dest_pdfPath'], exist_ok=True)
 
     # Imported here, not at module scope, so the argument and study checks above

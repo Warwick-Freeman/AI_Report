@@ -91,6 +91,51 @@ def importCmpeeg():
           'README.md), or point CMPEEG_PYD_DIR at the directory holding cmpeeg.pyd.')
 
 
+# Where a study's own outputs belong.
+#
+# Everything the analysis produces for one recording - the figures, the saved
+# analysis, the structured SCORE data and the document - goes with the recording
+# rather than into a shared reports folder. One study's outputs then travel with
+# it, and two studies can never write over each other's.
+#
+# For a native ProfusionEEG study, which is itself a folder, they go into a
+# subfolder rather than into the study root. The root belongs to ProfusionEEG:
+# it holds EEGData, EEGStudyDB.mdb, the montages and the .sdy descriptor, and
+# mixing report files in among them invites one particular accident - a tidy-up
+# that matches on the study's name and takes a study file with it. That is not
+# hypothetical. It is how 04HO, 05JC and 06MS lost their .sdy descriptors during
+# development, because a study's descriptor can share the study's stem. A
+# subfolder keeps the two sets of files apart and leaves the root as
+# ProfusionEEG wrote it.
+REPORT_SUBFOLDER = 'Report'
+
+
+def studyOutputFolder(studyPath):
+    """The folder a study's outputs belong in.
+
+    A ProfusionEEG study is a folder, so its outputs go into a Report subfolder
+    inside it - with the study, but not among its own files. A single file, an
+    EDF, has no folder of its own, so its outputs go beside it; their names
+    carry the study's stem, so two recordings in one folder stay distinct.
+    """
+    path = (studyPath or '').rstrip('\\/')
+    if os.path.isdir(path):
+        return os.path.join(path, REPORT_SUBFOLDER)
+    return os.path.dirname(os.path.abspath(path)) or '.'
+
+
+def resolveOutputFolder(destination, studyPath):
+    """The output folder to use, honouring an explicit one.
+
+    An empty destination, or the word 'study', means beside the study. Anything
+    else is used as given, so a caller that wants everything collected in one
+    place can still say so.
+    """
+    if destination and str(destination).strip().lower() not in ('study', 'auto'):
+        return str(destination)
+    return studyOutputFolder(studyPath)
+
+
 def readStudyMetadata(studyPath):
     """Channel names, sample rate and length from the study's .sdy XML.
 

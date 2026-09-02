@@ -444,9 +444,11 @@ def describeRecording(studyPath, raw=None, channels=None, ageYears=None,
         for label in ('High pass', 'Low pass', 'Notch'):
             entry = eventSettings.get(label)
             if entry:
-                parts.append('%s %s %s' % (label.lower(),
-                                           ' / '.join(entry['values']),
-                                           entry['unit']).strip())
+                # Bracketed: % binds looser than attribute access, so
+                # '...' % (a, b, c).strip() strips the tuple, not the string.
+                parts.append(('%s %s %s' % (label.lower(),
+                                            ' / '.join(entry['values']),
+                                            entry['unit'])).strip())
         conditions['Review filters'] = (', '.join(parts) if parts else NOT_RECORDED)
         if parts:
             conditions['Review filters'] += ' (from the study\'s own setting events)'

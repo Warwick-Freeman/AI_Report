@@ -634,7 +634,8 @@ class StudyBrowser(QMainWindow):
         return {
             'study': study['path'],
             'patientDob': dob.strftime('%Y-%m-%d') if dob is not None else None,
-            'dest_pdfPath': self.outEdit.text().strip() or './reports',
+            # Empty means the study's own folder - study_runner resolves it.
+            'dest_pdfPath': self.outEdit.text().strip(),
             'outputPdf': self.pdfCheck.isChecked(),
             'aiReport': self.aiCheck.isChecked(),
             'reportLang': self.langCombo.currentText().strip() or 'english',
@@ -727,11 +728,14 @@ class StudyBrowser(QMainWindow):
             return
 
         try:
-            os.makedirs(options['dest_pdfPath'], exist_ok=True)
+            import profusion
+            resolved = profusion.resolveOutputFolder(options['dest_pdfPath'],
+                                                     study['path'])
+            os.makedirs(resolved, exist_ok=True)
             # Written beside the report so the exact run can be repeated with
             # "python study_runner.py <this file>".
             optionsPath = os.path.join(
-                options['dest_pdfPath'],
+                resolved,
                 os.path.splitext(os.path.basename(study['path']))[0]
                 + '_options.json')
             with open(optionsPath, 'w', encoding='utf-8') as f:

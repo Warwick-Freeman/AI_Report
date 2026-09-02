@@ -80,7 +80,7 @@ class Tee(io.TextIOBase):
             pass
 
 
-def ensureOutputFolder(path):
+def ensureOutputFolder(path, study=None):
     """Create the output folder now, and report why if it cannot be.
 
     Checked before the analysis starts, not at the end of it. The folder is only
@@ -91,7 +91,8 @@ def ensureOutputFolder(path):
 
     Returns (absolutePath, error).
     """
-    raw = path or './reports'
+    import profusion
+    raw = profusion.resolveOutputFolder(path, study) if study else (path or '.')
     absolute = os.path.abspath(raw)
     if os.path.isdir(absolute):
         return absolute, None
@@ -461,7 +462,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/analysis':
             study = (query.get('study') or '').strip()
-            folder, folderError = ensureOutputFolder(query.get('dest'))
+            folder, folderError = ensureOutputFolder(query.get('dest'), study)
             if not study:
                 return self._send(400, {'error': 'no study given'})
             fileName = os.path.basename(study.rstrip('/\\'))
@@ -530,7 +531,8 @@ class Handler(BaseHTTPRequestHandler):
 
             # Settle the output folder before spending minutes on the analysis.
             options = dict(body.get('options') or {})
-            folder, folderError = ensureOutputFolder(options.get('dest_pdfPath'))
+            folder, folderError = ensureOutputFolder(
+                options.get('dest_pdfPath'), study)
             if folderError:
                 return self._send(400, {'error': folderError})
             options['dest_pdfPath'] = folder
@@ -558,7 +560,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/restore':
             study = (body.get('study') or '').strip()
             folder, folderError = ensureOutputFolder(
-                (body.get('options') or {}).get('dest_pdfPath'))
+                (body.get('options') or {}).get('dest_pdfPath'), study)
             if folderError:
                 return self._send(400, {'error': folderError})
             fileName = os.path.basename(study.rstrip('/\\'))

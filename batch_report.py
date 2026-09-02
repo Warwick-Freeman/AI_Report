@@ -60,7 +60,10 @@ def runOne(recording, outputFolder, overrides, python=None):
     name = os.path.basename(recording.rstrip('/\\'))
     # splitext, so a name containing a dot is not truncated at the first one.
     stem = os.path.splitext(name)[0]
-    optionsPath = os.path.join(outputFolder, stem + '_options.json')
+    import profusion
+    optionsPath = os.path.join(
+        profusion.resolveOutputFolder(outputFolder, recording),
+        stem + '_options.json')
     options = buildOptions(recording, outputFolder, overrides)
 
     started = time.time()
@@ -103,11 +106,26 @@ def runOne(recording, outputFolder, overrides, python=None):
             'log': output}
 
 
-def cleanIntermediates(outputFolder):
-    """Remove the leftover figures from the last run in the folder."""
+def cleanIntermediates(outputFolder, recordings=()):
+    """Remove the figures the runs left behind.
+
+    The figures are named after each study now, so they are removed per study
+    and from wherever that study's report was actually written.
+    """
+    import createPDF
+    import profusion
+
     removed = 0
-    for figure in INTERMEDIATE_FIGURES:
-        path = os.path.join(outputFolder, figure)
+    targets = []
+    for recording in recordings:
+        folder = profusion.resolveOutputFolder(outputFolder, recording)
+        for name in createPDF.figureNames(os.path.basename(recording)):
+            targets.append(os.path.join(folder, name))
+    if not recordings:
+        for figure in INTERMEDIATE_FIGURES:
+            targets.append(os.path.join(outputFolder or '.', figure))
+
+    for path in targets:
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -146,9 +164,12 @@ def main():
         print('ERROR: not a folder: %s' % args.folder)
         return 2
 
-    outputFolder = args.out or os.path.join(
-        'reports', os.path.basename(os.path.abspath(args.folder.rstrip('/\\'))))
-    os.makedirs(outputFolder, exist_ok=True)
+    # Without --out, each study's outputs go into its own folder, so a batch
+    # leaves every report beside the recording it describes rather than piling
+    # them all into one directory.
+    outputFolder = args.out or ''
+    if outputFolder:
+        os.makedirs(outputFolder, exist_ok=True)
 
     recordings = findRecordings(args.folder)
     if not recordings:
@@ -161,7 +182,8 @@ def main():
                  'stageSleep': not args.no_sleep}
 
     print('%d recording(s) in %s' % (len(recordings), args.folder))
-    print('Reports  -> %s' % os.path.abspath(outputFolder))
+    print('Reports  -> %s' % (os.path.abspath(outputFolder) if outputFolder
+                             else "each study's own folder"))
     print('Running %d at a time%s' % (args.jobs, ', with the LLM sections'
                                       if args.ai else ''))
     print('-' * 78, flush=True)
@@ -188,7 +210,7 @@ def main():
                      result['seconds'], result['message']), flush=True)
 
     if not args.keep_figures:
-        cleanIntermediates(outputFolder)
+        cleanIntermediates(outputFolder, recordings)
 
     results.sort(key=lambda r: r['name'].lower())
     succeeded = [r for r in results if r['ok']]
@@ -201,7 +223,7 @@ def main():
         print('  FAILED %-16s %s' % (result['name'], result['message']))
     if failed:
         # The full log of a failure is worth keeping rather than scrolling past.
-        logPath = os.path.join(outputFolder, 'batch_failures.log')
+        logPath = os.path.join(outputFolder or '.', 'batch_failures.log')
         try:
             with open(logPath, 'w', encoding='utf-8') as f:
                 for result in failed:
