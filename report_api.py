@@ -406,6 +406,12 @@ def conclusionSection(conclusion):
     return rows, draft
 
 
+# How many events are carried to the front end. A long-term recording can hold
+# tens of thousands; the reader is told when the list is cut rather than being
+# shown a truncated one that looks complete.
+EVENT_LIMIT = 500
+
+
 def eventsSection(studyPath):
     """Study events the reader may carry into the report.
 
@@ -421,7 +427,15 @@ def eventsSection(studyPath):
         raw = studyevents.readEvents(studyPath, verbose=False)
     except Exception:
         return events
-    for e in raw[:500]:
+
+    # End events are dropped here as they are everywhere else. ProfusionEEG
+    # stores a timed event as a start carrying the duration plus an end at
+    # start+duration, so keeping both listed each one twice - and made the
+    # count of detector events on this screen twice what the Episodes page
+    # showed for the same four seizures.
+    raw = [e for e in raw if not e.get('is_end_event')]
+
+    for e in raw[:EVENT_LIMIT]:
         start = e.get('start_ns')
         # A detection is a model's output; an annotation is a person's; a
         # setting change or a viewing record is neither, and is measured fact
@@ -434,7 +448,10 @@ def eventsSection(studyPath):
             provenance = MEASURED
         events.append({
             'id': 'ev_%s' % e.get('id'),
-            'type': e.get('type_label') or ('type %s' % e.get('type_id')),
+            # Always the name ProfusionEEG uses. labelFor never returns
+            # nothing, so the numeric id stays out of the display and is
+            # carried alongside for anyone who needs to match on it.
+            'type': e.get('type_label') or 'Unrecognised type',
             'type_id': e.get('type_id'),
             'type_name': e.get('type_name'),
             'text': e.get('text') or '',
@@ -446,7 +463,7 @@ def eventsSection(studyPath):
             'provocation': e.get('provocation'),
             'included': False,
         })
-    return events
+    return events, len(raw)
 
 
 # ------------------------------------------------------------------- assembly
@@ -494,8 +511,10 @@ def buildReport(results, studyPath, options=None):
                      'notes': artifactNotes,
                      'significance_options': list(ARTIFACT_SIGNIFICANCE)})
 
+    studyEvents, eventTotal = eventsSection(studyPath)
     sections.append({'id': 'events', 'rows': [], 'findings': [],
-                     'events': eventsSection(studyPath), 'notes': []})
+                     'events': studyEvents, 'event_total': eventTotal,
+                     'notes': []})
 
     import score_common as sc
     conclusionRows, draft = conclusionSection(results.get('conclusion'))

@@ -369,6 +369,18 @@ def applyToResults(results, report):
             episodes = results['spikeseizure'].get('episodes') or []
             results['spikeseizure']['episodes'] = [
                 e for e in episodes if e.get('name') in keep]
+        if section['id'] == 'events':
+            # The Events screen offers to carry events into the report, and
+            # until now nothing did: the selection was recorded and then
+            # ignored. Whatever the reader ticked goes to the document.
+            results['selected_events'] = [
+                {'type': e.get('type'), 'seconds': e.get('seconds'),
+                 'duration_seconds': e.get('duration_seconds'),
+                 'text': e.get('text'), 'channels': e.get('channels') or [],
+                 'provocation': e.get('provocation'),
+                 'is_detection': bool(e.get('is_detection'))}
+                for e in section.get('events') or [] if e.get('included')]
+
         if section['id'] == 'conclusion':
             values = {row['id']: row.get('override') or row.get('value')
                       for row in section.get('rows') or []}

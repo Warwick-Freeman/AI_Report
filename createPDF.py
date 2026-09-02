@@ -371,6 +371,8 @@ class writePDF:
         self.writePdrPage(pdf, fontName, line_height, wanted('pdr', results.get('pdr')))
         self.writeInterictalPage(pdf, fontName, line_height, wanted('interictal', results.get('interictal')))
         self.writeEpisodesPage(pdf, fontName, line_height, wanted('episodes', (results.get('spikeseizure') or {}).get('episodes')))
+        self.writeEventsPage(pdf, fontName, line_height,
+                             wanted('events', results.get('selected_events')))
         self.writeSleepPage(pdf, fontName, line_height, wanted('sleep', results.get('sleep')))
         self.writeArtifactPage(pdf, fontName, line_height, wanted('artifacts', results.get('artifacts')))
         self.writeConclusionPage(pdf, fontName, line_height, wanted('conclusion', results.get('conclusion')))
@@ -434,6 +436,51 @@ class writePDF:
             pdf.set_x(pdf.l_margin)
             pdf.set_text_color(0, 0, 0)
         pdf.set_font(fontName, size=9)
+
+    def writeEventsPage(self, pdf, fontName, line_height, events):
+        """The study events the reader chose to carry into the report.
+
+        Each is named the way ProfusionEEG names it, not by its numeric type.
+        None of these is a finding: they are the record of what happened during
+        the recording - what the technologist noted, what was changed, what was
+        administered - and they are here as context for the findings elsewhere.
+        """
+        if not events:
+            return
+
+        pdf.add_page(orientation='P')
+        pdf.set_font(fontName, size=18)
+        pdf.cell(196, line_height, text='Study Events', ln=1, align='C')
+        pdf.set_font(fontName, size=10)
+        pdf.cell(196, line_height - 2,
+                 text='Selected by the reader as context, from the study\'s own '
+                      'event record', ln=1, align='C')
+        pdf.ln(3)
+
+        widths = (52, 22, 20, 62, 40)
+        rowHeight = line_height - 1
+        pdf.set_font(fontName, size=9)
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Event', 'Time', 'Duration', 'Text', 'Channels'),
+                                widths)), rowHeight, fill=True)
+        for event in events:
+            seconds = event.get('seconds')
+            duration = event.get('duration_seconds') or 0
+            self._row(pdf, ((event.get('type') or '', widths[0]),
+                            ('' if seconds is None else _hms(seconds), widths[1]),
+                            ('%.0f s' % duration if duration else '', widths[2]),
+                            (event.get('text') or '', widths[3]),
+                            (', '.join(event.get('channels') or []), widths[4])),
+                      rowHeight)
+            note = []
+            if event.get('provocation'):
+                note.append('SCORE provocation: %s' % event['provocation'])
+            if event.get('is_detection'):
+                note.append('detector output')
+            if note:
+                self._subLine(pdf, fontName, '. '.join(note), widths[0],
+                              line_height - 3.5)
+                pdf.set_font(fontName, size=9)
 
     def writePdrPage(self, pdf, fontName, line_height, pdrResult):
         """A page for the posterior dominant rhythm, scored against SCORE.

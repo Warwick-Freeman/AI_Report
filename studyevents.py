@@ -260,8 +260,8 @@ def describeTypes(studyPath):
                                          key=lambda kv: -kv[1]):
         samples = [e['text'] for e in events
                    if e['type_id'] == typeId and e['text']][:3]
-        print('  %5dx  type %-8s %-22s %s'
-              % (count, typeId, label or '(no unambiguous name)',
+        print('  %5dx  %-28s (type %-5s) %s'
+              % (count, label or 'unnamed', typeId,
                  '; '.join(repr(s) for s in samples)))
     return events
 
@@ -285,7 +285,8 @@ def printEvents(events, source=''):
     print('  %d event(s), %d carrying trace names' % (len(events), withTraces))
     for (typeId, label), count in sorted(summariseTypes(events).items(),
                                          key=lambda kv: -kv[1]):
-        print('    %5dx  type %-8s %s' % (count, typeId, label or '(unlabelled)'))
+        print('    %5dx  %-30s (type %s)'
+              % (count, label or 'unnamed', typeId))
     if not withTraces:
         print('  NOTE: no event carries a trace name, so location for these '
               'events must come from the event text.')

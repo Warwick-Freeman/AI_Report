@@ -492,7 +492,10 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
             print('  Event types in this study:')
             for (tid, label), count in sorted(
                     studyevents.summariseTypes(events).items(), key=lambda kv: -kv[1]):
-                print('     %5dx  type %-8s %s' % (count, tid, label or '(unlabelled)'))
+                # Name first: the number is only useful for matching, and a
+                # column of numbers is what this replaced.
+                print('     %5dx  %-30s (type %s)'
+                      % (count, label or 'unnamed', tid))
             print('  This study carries no %s (%d) or %s (%d) events, so the '
                   'Spike and Seizure plug-in has not run on it.'
                   % (eventtypes.EVENT_TYPES[eventtypes.SPIKE_TYPES[0]][0],

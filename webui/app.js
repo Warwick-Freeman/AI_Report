@@ -428,48 +428,76 @@ function renderAnalysis() {
     ? '<button class="btn" id="againBtn">Run again</button>'
     : '';
   var html = headHtml('Analyses',
-    'Show which analyses have results and run the ones that do not.', actions);
-
-  if (S.status === 'idle') {
-    html += emptyHtml('not-analysed', 'Not analysed',
-      'Nothing has been analysed yet.',
-      'Choose a study on Report home and run the analyses.');
-  } else {
-    var rows = [
-      ['Recording and duration accounting', 'recording'],
-      ['Posterior dominant rhythm', 'pdr'],
-      ['Interictal findings', 'interictal'],
-      ['Spike and seizure detections', 'episodes'],
-      ['Sleep staging', 'sleep'],
-      ['Artifacts', 'artifacts'],
-      ['Study events', 'events']
-    ];
-    html += '<table><thead><tr><th scope="col">Analysis</th><th scope="col">Result</th>' +
-      '<th scope="col" class="nowrap">Provenance</th></tr></thead><tbody>';
-    rows.forEach(function (r) {
-      var sec = section(r[1]);
-      var state = sec ? sec.state : (S.status === 'running' ? 'running' : 'not-analysed');
-      var count = sec ? ((sec.findings || []).length + (sec.rows || []).length +
-        (sec.events || []).length) : 0;
-      var result = {
-        'populated': count + ' item(s)',
-        'no-findings': 'No findings',
-        'not-analysed': 'Not analysed',
-        'running': 'Running\u2026'
-      }[state] || state;
-      var kind = state === 'not-analysed' ? 'none'
-        : (r[1] === 'sleep' || r[1] === 'episodes') ? 'model'
-          : r[1] === 'events' ? 'human' : 'measured';
-      html += '<tr><td>' + esc(r[0]) + '</td><td class="value">' + esc(result) +
-        '</td><td>' + prov(kind) + '</td></tr>';
-    });
-    html += '</tbody></table>';
-  }
+    'What has results and where each came from.', actions);
 
   if (S.error) {
     html += emptyHtml('failed', 'Error', 'The analysis reported a problem.',
                       S.error);
   }
+
+  if (S.status === 'idle') {
+    html += emptyHtml('not-analysed', 'Not analysed',
+      'Nothing has been analysed yet.',
+      'Choose a study on Report home and run the analyses, or load a saved ' +
+      'analysis if this study has been analysed before.');
+  } else {
+    if (S.restored) {
+      html += '<div class="note">These results were loaded from a saved ' +
+        'analysis. The recording was not analysed again, so every value below ' +
+        'is the one the analysis produced when it ran.</div>';
+    }
+    // Each row names what produced the result, because that is what the
+    // provenance mark on the findings depends on.
+    var rows = [
+      ['Recording and duration accounting', 'recording', 'measured',
+       'the study header, and its own setting and montage events'],
+      ['Activation procedures', 'recording', 'measured',
+       'hyperventilation, photic and cortical stimulation events'],
+      ['Posterior dominant rhythm', 'pdr', 'model',
+       'frequency from the CNN/GoogleNet/ResNet ensemble, the rest measured'],
+      ['Interictal findings', 'interictal', 'measured',
+       'band power per electrode, against the contralateral side'],
+      ['Spike and seizure detections', 'episodes', 'model',
+       'eetEEGSpike and eetEEGSeizure events, from the cleared detector'],
+      ['Sleep staging', 'sleep', 'model', 'U-Sleep or YASA, unverified'],
+      ['Artifacts', 'artifacts', 'measured', 'eleven deterministic detectors'],
+      ['Study events', 'events', 'human',
+       'the study\'s own event record, named as ProfusionEEG names it']
+    ];
+    html += '<table><thead><tr><th scope="col">Analysis</th>' +
+      '<th scope="col">Result</th><th scope="col" class="nowrap">Provenance</th>' +
+      '<th scope="col">Source</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var sec = section(r[1]);
+      var state = sec ? sec.state : (S.status === 'running' ? 'running' : 'not-analysed');
+      var count = 0;
+      var result;
+      if (r[0] === 'Activation procedures') {
+        var act = (section('recording') || {}).activation;
+        var performed = ((act || {}).procedures || []).filter(function (p) {
+          return p.provenance === 'measured';
+        }).length;
+        result = act ? (performed + ' performed') : 'Not recorded';
+      } else {
+        if (sec) {
+          count = (sec.findings || []).length + (sec.rows || []).length +
+            (sec.events || []).length;
+        }
+        result = {
+          'populated': count + ' item(s)',
+          'no-findings': 'No findings',
+          'not-analysed': 'Not analysed',
+          'running': 'Running\u2026'
+        }[state] || state;
+      }
+      var kind = state === 'not-analysed' ? 'none' : r[2];
+      html += '<tr><td>' + esc(r[0]) + '</td><td class="value">' + esc(result) +
+        '</td><td>' + prov(kind) + '</td><td><span class="basis" ' +
+        'style="margin:0">' + esc(r[3]) + '</span></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+
   html += '<h3 class="sub">Analysis log</h3><pre class="log" id="logBox">' +
     esc(S.log || '(nothing yet)') + '</pre>';
 
@@ -478,6 +506,7 @@ function renderAnalysis() {
   if (box) box.scrollTop = box.scrollHeight;
   var again = document.getElementById('againBtn');
   if (again) again.onclick = startAnalysis;
+  wireEmpty();
 }
 
 function emptyHtml(kind, label, title, why, actionLabel, actionId) {
@@ -594,6 +623,9 @@ function eventsTable(sec) {
   var detections = sec.events.filter(function (e) { return e.is_detection; }).length;
   var provocations = sec.events.filter(function (e) { return e.provocation; }).length;
 
+  var shown = Math.min(sec.events.length, 200);
+  var total = sec.event_total || sec.events.length;
+
   var summary = 'Named as ProfusionEEG names them. ';
   summary += detections
     ? detections + ' of these are detector output. '
@@ -601,9 +633,20 @@ function eventsTable(sec) {
   if (provocations) {
     summary += provocations + ' record a provocation SCORE asks to be reported. ';
   }
-  summary += 'The rest are annotations and recording events, offered as context.';
+  summary += 'The rest are annotations and recording events. Whatever is ' +
+    'ticked here is written to the report as a Study Events page, as context ' +
+    'for the findings rather than as findings.';
 
-  var html = '<p class="job">' + esc(summary) + '</p>' +
+  // Say when the list is cut. A truncated table that looks complete would let
+  // a reader believe they had seen every event in the recording.
+  var cut = '';
+  if (shown < total) {
+    cut = '<div class="note">Showing the first ' + shown + ' of ' + total +
+      ' events. The rest are in the study and can be reviewed in ' +
+      'ProfusionEEG; they are not listed here.</div>';
+  }
+
+  var html = '<p class="job">' + esc(summary) + '</p>' + cut +
     '<table><thead><tr>' +
     '<th scope="col" style="width:24px"><span class="sr-only">Include</span></th>' +
     '<th scope="col">Type</th><th scope="col">Time</th>' +
@@ -817,6 +860,15 @@ function renderGenerate() {
             : 'Run the analyses from Report home first.',
           'Run analyses', 'runFromSection');
   } else {
+    html += '<div class="panel"><h3 class="sub">Where it will be written</h3>' +
+      '<p class="job">' +
+      esc(S.options.dest_pdfPath
+        ? S.options.dest_pdfPath
+        : 'The study\'s own folder - a ProfusionEEG study gets a Report ' +
+          'subfolder inside it, and a single file gets its outputs beside it. ' +
+          'Set an output folder on Report home to collect reports elsewhere.') +
+      '</p></div>';
+
     html += '<div class="panel"><h3 class="sub">Included sections</h3><ul class="plain">';
     S.report.sections.forEach(function (s) {
       html += '<li>' + esc(s.label) + ' \u2014 ' +
@@ -890,6 +942,19 @@ function renderSettings() {
       esc((S.llm.wanted || []).join(', ')) + '.</p>';
   }
   html += '</div>';
+
+  html += '<div class="panel"><h3 class="sub">Where outputs go</h3>' +
+    '<table><tbody>' +
+    '<tr><td class="value nowrap">ProfusionEEG study</td><td>' +
+    '&lt;study&gt;.eeg/Report/ &mdash; a subfolder, so the study\'s own files ' +
+    'are left as ProfusionEEG wrote them</td></tr>' +
+    '<tr><td class="value nowrap">Single file (EDF)</td><td>beside the file, ' +
+    'each name carrying the study\'s own stem</td></tr>' +
+    '</tbody></table>' +
+    '<p class="job">Each analysis is saved as &lt;study&gt;.analysis.json with ' +
+    'the figures it drew, so a study can be reported again without being ' +
+    'analysed again. An output folder set on Report home overrides all of ' +
+    'this.</p></div>';
 
   html += '<div class="panel"><h3 class="sub">Analysis defaults</h3>' +
     '<pre class="log">' + esc(JSON.stringify(S.defaults, null, 1)) + '</pre></div>';

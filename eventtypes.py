@@ -22,7 +22,8 @@
 #
 # GENERATED - do not edit by hand. The enum and gs_EventStringIDs come from
 # ProFusionEEG's EEGEvent.cpp; the display strings from ProFusionEEG.rc. Rebuild
-# with the generator in the scratchpad if either changes.
+# with generate_eventtypes.py, which needs ProFusionEEG.rc in the repository
+# root - the .rc itself is gitignored as product source.
 ############################################
 
 # id -> (identifier, display label). A label of None means ProfusionEEG defines
@@ -140,6 +141,10 @@ ANNOTATION_TYPE = 1
 PROVOCATION_TYPES = {
     4: 'Photic stimulation',
     45: 'Photic stimulation',
+    # A photic run is evidenced by its frequency changes: 05JC.eeg records nine
+    # of them, at 4 to 40 Hz, and no individual flashes. recording.py counts
+    # these as photic, so they are flagged as photic here too.
+    35: 'Photic stimulation',
     8: 'Hyperventilation',
     46: 'Post hyperventilation',
     50: 'Cortical stimulation',
@@ -185,7 +190,9 @@ def labelFor(typeId):
     resolved, offset = resolveTypeId(typeId)
     entry = EVENT_TYPES.get(resolved)
     if not entry:
-        return 'Type %s' % typeId
+        # Not in the enum at all. The number is all there is, so it is shown as
+        # an unrecognised type rather than dressed up as a name.
+        return 'Unrecognised type %s' % typeId
     identifier, label = entry
     return label or identifier
 

@@ -685,6 +685,24 @@ Generation writes the report document and, beside it,
 `<study>.score.json` - the same report as structured data, carrying every
 value's provenance and the reader's overrides.
 
+#### Study events in the report
+
+The Events screen offers to carry events into the report, and now does: whatever
+is ticked is written as a **Study Events** page, each event named the way
+ProfusionEEG names it. None of them is a finding - they are the record of what
+happened during the recording, and they appear as context for the findings
+elsewhere. Until this was wired up the selection was recorded and then ignored.
+
+Numeric event types stay out of the display. A type not in the enum at all reads
+as *Unrecognised type 1234* rather than being dressed up as a name, and the log
+inventories name the type before numbering it.
+
+End events are dropped from the list, as they are everywhere else - a timed event
+is stored as a start carrying the duration plus an end at start+duration, and
+keeping both listed every event twice and made the detector-event count on this
+screen twice what the Episodes page showed for the same seizures. Where the list
+is longer than the screen shows, it says so rather than looking complete.
+
 #### What it does not do yet
 
 - The document is the existing PDF. The brief asks for a **.docx** from a Word
