@@ -121,15 +121,38 @@ EVENT_TYPES = {
 # Some studies store the type with 1000 added - see resolveTypeId().
 DB_TYPE_OFFSET = 1000
 
-# The Spike and Seizure plug-in.
-SPIKE_TYPES = (74,)
+# Spike detections.
+#
+# 74 is eetEEGSpike, the Spike and Seizure plug-in's own type. 23 and 24 are
+# named for Persyst Reveal in ProfusionEEG's resources, but the Spike and
+# Seizure plug-in writes its spikes there too: 05JC.eeg was processed by that
+# plug-in - its four seizures are eetEEGSeizure (75) - and its 448 spike
+# detections are type 24, with per-detection channel lists, while type 74 is
+# empty. A spike-and-seizure detector that found four seizures and no
+# interictal spikes at all is not credible.
+#
+# So the type says a spike was detected. It does not say which detector found
+# it, and nothing here claims otherwise - the findings attribute them to 'the
+# spike detector' and say so. The translation from the plug-in's internal type
+# space (EVTY_SPIKE_DETECTION, 1.3 million and up) to these values happens in
+# the ProfusionEEG host, which is not in this repository, so this rests on the
+# study's contents rather than on the mapping code.
+SPIKE_TYPES = (74, 23, 24)
 SEIZURE_TYPES = (75,)
 
-# Persyst Reveal, a separate detector. Recognised, labelled, not selected by
-# default: attributing its output to the cleared detector would be wrong.
-REVEAL_SPIKE_TYPES = (23, 24)
+# Persyst's own seizure type, which no study seen here carries. Kept separate
+# because 22 has never been observed alongside the plug-in's output, so there
+# is no evidence it is shared the way 23 and 24 are.
 REVEAL_SEIZURE_TYPES = (22,)
-REVEAL_TYPES = (22, 23, 24, 25, 26)
+REVEAL_SPIKE_TYPES = ()
+REVEAL_TYPES = (22, 25, 26)
+
+# Where a type is shared between detectors, the vendor-specific resource string
+# would assert something the type cannot support. These read as what they are.
+SHARED_TYPE_LABELS = {
+    23: 'Spike',
+    24: 'Spike burst',
+}
 
 # High-frequency oscillations, another separate plug-in.
 HFO_TYPES = (68,)
@@ -188,6 +211,8 @@ def labelFor(typeId):
     a guess, and never to the event's own text.
     """
     resolved, offset = resolveTypeId(typeId)
+    if resolved in SHARED_TYPE_LABELS:
+        return SHARED_TYPE_LABELS[resolved]
     entry = EVENT_TYPES.get(resolved)
     if not entry:
         # Not in the enum at all. The number is all there is, so it is shown as

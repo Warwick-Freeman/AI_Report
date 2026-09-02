@@ -191,13 +191,25 @@ def _locationOver(detections):
         for channel, value in (detection.amplitudes or {}).items():
             magnitudes[channel] = max(magnitudes.get(channel, 0.0), abs(float(value)))
 
-    def discriminates(values):
-        return len(set(round(v, 6) for v in values.values())) > 1
+    def topIsUnique(values):
+        """Whether one electrode alone holds the highest value.
 
-    if magnitudes and discriminates(magnitudes):
+        Not merely whether the values differ. In 05JC.eeg's 448 spike
+        detections F8, Fp1 and Fp2 were each implicated in all 448 while F7 was
+        in 339 - so the values do differ, and a test for that named Fp1 the
+        maximum out of a three-way tie. SCORE records the location maximum as
+        the electrode of peak negativity, and picking one of three equals
+        asserts a focus the data does not show.
+        """
+        if not values:
+            return False
+        ranked = sorted((round(v, 6) for v in values.values()), reverse=True)
+        return len(ranked) > 1 and ranked[0] > ranked[1]
+
+    if magnitudes and topIsUnique(magnitudes):
         return (sc.locationFromChannels(list(counts), magnitudes), counts,
                 'detected spike amplitude')
-    if counts and discriminates(counts):
+    if counts and topIsUnique(counts):
         return (sc.locationFromChannels(list(counts), counts), counts,
                 'how often each electrode was implicated')
     # Nothing separates them - report the region without naming a maximum.

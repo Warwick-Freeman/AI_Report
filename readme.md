@@ -173,21 +173,37 @@ An event in a study carries a numeric `EventTypeID` and nothing that names it.
 values with the display strings from `ProFusionEEG.rc` - so events read the way
 they do in the application instead of as a column of numbers.
 
-Two entries carry the weight:
+These identify a detection:
 
-| Type | Identifier | Shown as |
-| --- | --- | --- |
-| 74 | `eetEEGSpike` | Spike |
-| 75 | `eetEEGSeizure` | Seizure |
+| Type | Identifier | Shown as | Selected as |
+| --- | --- | --- | --- |
+| 74 | `eetEEGSpike` | Spike | spike |
+| 23 | `eetRevealSpike` | Spike | spike |
+| 24 | `eetRevealSpikeBurst` | Spike burst | spike |
+| 75 | `eetEEGSeizure` | Seizure | seizure |
 
-Those are the Spike and Seizure plug-in's own types, and they are what
-identifies a detection. Type 1 is `eetAnnotation` - a technologist's note -
-which is why every study's `EEGEventString` rows sit under that single type: the
-table is the pick-list of annotation texts, not a list of type names.
+23 and 24 are named for Persyst Reveal in ProfusionEEG's resources, but the
+Spike and Seizure plug-in writes its spikes there too. `05JC.eeg` settles it:
+that study was processed by the plug-in - its four seizures are
+`eetEEGSeizure` - and its 448 spike detections are type 24 with per-detection
+channel lists, while type 74 is empty. A spike-and-seizure detector that found
+four seizures and no interictal spikes at all is not credible.
 
-Persyst Reveal (22-26) and HFO (68) are separate detectors. They are recognised
-and named, and deliberately **not** scored as the cleared detector's output; a
-study carrying them says so in the log.
+So the type says a spike was detected; it does not say which detector found it.
+The findings attribute them to *the spike detector* and claim nothing more. The
+translation from the plug-in's internal type space (`EVTY_SPIKE_DETECTION`, 1.3
+million and up) into these values happens in the ProfusionEEG host, which is not
+in this repository, so this rests on what the studies contain rather than on the
+mapping code. Where a type is shared, the vendor-specific resource string is not
+used - type 24 reads as *Spike burst*, not as one vendor's name for it.
+
+Type 1 is `eetAnnotation` - a technologist's note - which is why every study's
+`EEGEventString` rows sit under that single type: the table is the pick-list of
+annotation texts, not a list of type names.
+
+Persyst's own seizure type (22) and HFO (68) stay separate. Neither has been
+seen alongside the plug-in's output, so there is no evidence they are shared the
+way 23 and 24 are.
 
 Some studies store the type with 1000 added. The offset is not assumed - both
 forms are accepted - but it is well evidenced: 1029 carries `0.50` and is
