@@ -516,18 +516,40 @@ function findingsTable(sec) {
 
 function eventsTable(sec) {
   if (!sec.events || !sec.events.length) return '';
-  var html = '<p class="job">Every one of these is a human annotation or a ' +
-    'system marker, so each is offered as context and none as a finding.</p>' +
-    '<table><thead><tr><th style="width:24px"></th><th scope="col">Type</th><th scope="col">Time</th>' +
-    '<th scope="col">Duration</th><th scope="col">Text</th><th scope="col">Channels</th></tr></thead><tbody>';
+
+  var detections = sec.events.filter(function (e) { return e.is_detection; }).length;
+  var provocations = sec.events.filter(function (e) { return e.provocation; }).length;
+
+  var summary = 'Named as ProfusionEEG names them. ';
+  summary += detections
+    ? detections + ' of these are detector output. '
+    : 'None is a detector detection. ';
+  if (provocations) {
+    summary += provocations + ' record a provocation SCORE asks to be reported. ';
+  }
+  summary += 'The rest are annotations and recording events, offered as context.';
+
+  var html = '<p class="job">' + esc(summary) + '</p>' +
+    '<table><thead><tr>' +
+    '<th scope="col" style="width:24px"><span class="sr-only">Include</span></th>' +
+    '<th scope="col">Type</th><th scope="col">Time</th>' +
+    '<th scope="col">Duration</th><th scope="col">Text</th>' +
+    '<th scope="col">Channels</th><th scope="col" class="nowrap">Provenance</th>' +
+    '</tr></thead><tbody>';
   sec.events.slice(0, 200).forEach(function (e) {
     html += '<tr><td><input type="checkbox" data-event="' + esc(e.id) +
       '" data-section="events"' + (e.included ? ' checked' : '') +
       ' style="width:auto"></td>' +
-      '<td>' + esc(e.type) + '</td><td class="nowrap">' + esc(seconds(e.seconds)) +
-      '</td><td class="nowrap">' + esc(e.duration_seconds ? seconds(e.duration_seconds) : '') +
-      '</td><td>' + esc(e.text) + '</td><td>' + esc((e.channels || []).join(', ')) +
-      '</td></tr>';
+      '<td class="value">' + esc(e.type) +
+      (e.is_detection ? '<span class="basis">detector output</span>' : '') +
+      (e.provocation ? '<span class="basis">SCORE provocation: ' +
+        esc(e.provocation) + '</span>' : '') +
+      '</td><td class="nowrap">' + esc(seconds(e.seconds)) +
+      '</td><td class="nowrap">' +
+      esc(e.duration_seconds ? seconds(e.duration_seconds) : '') +
+      '</td><td>' + esc(e.text) + '</td><td>' +
+      esc((e.channels || []).join(', ')) +
+      '</td><td>' + prov(e.provenance) + '</td></tr>';
   });
   return html + '</tbody></table>';
 }

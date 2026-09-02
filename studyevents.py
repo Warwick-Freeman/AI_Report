@@ -30,6 +30,8 @@
 import glob
 import os
 
+import eventtypes
+
 ACCESS_DRIVER = 'Microsoft Access Driver (*.mdb, *.accdb)'
 EVENT_DB_NAMES = ('EEGStudyDB.mdb', 'EVENTS.MDB')
 
@@ -153,33 +155,26 @@ def readEvents(studyPath, verbose=True):
                       'events file, not the study database.' % os.path.basename(path))
             return []
 
-        # A type label, but only where one genuinely exists.
+        # The type's name comes from ProfusionEEG's own event-type table
+        # (eventtypes.py), which is the only thing that actually names a type.
         #
-        # EEGEventString is not a table of type names. Across all seven demo
-        # studies every row carries EventTypeID 1, because it is the pick-list of
-        # predefined annotation texts an operator can choose from - 'Eyes Open',
-        # 'Coughing', 'Swallow' - organised by category. Reading it as a type
-        # name gave every type-1 event in Demo.eeg the label 'Drowsy', which was
-        # simply the first row of that pick-list.
-        #
-        # So a label is taken only when a type id maps to exactly one distinct
-        # string. A pick-list is ambiguous by construction and yields nothing; a
-        # detector that names its own event type resolves to that one name. The
-        # rule needs no list of known versions and fails closed.
-        strings = {}
+        # EEGEventString does not: across every study examined all its rows carry
+        # EventTypeID 1, because that table is the pick-list of annotation texts
+        # an operator chooses from - 'Eyes Open', 'Coughing' - and type 1 is
+        # eetAnnotation. Reading it as a type name gave every type-1 event in
+        # Demo.eeg the label 'Drowsy', the first row of that list. It is still
+        # read, but only as what it is: the set of predefined annotation texts.
+        annotationTexts = []
         if 'EEGEventString' in tables:
             columns = _columnMap(cursor, 'EEGEventString')
             rows, at = _select(cursor, 'EEGEventString', columns,
                                ('EventTypeID', 'ShortText', 'FullText'))
             for row in rows:
-                typeId = row[at['EventTypeID']] if at['EventTypeID'] is not None else None
                 short = row[at['ShortText']] if at['ShortText'] is not None else None
                 full = row[at['FullText']] if at['FullText'] is not None else None
                 text = (short or full or '').strip()
-                if typeId is not None and text:
-                    strings.setdefault(typeId, set()).add(text)
-        labels = {typeId: next(iter(texts))
-                  for typeId, texts in strings.items() if len(texts) == 1}
+                if text:
+                    annotationTexts.append(text)
 
         categories = {}
         if 'EEGEventCategory' in tables:
@@ -230,7 +225,11 @@ def readEvents(studyPath, verbose=True):
             events.append({
                 'id': eventId,
                 'type_id': value(row, 'EventTypeID'),
-                'type_label': labels.get(value(row, 'EventTypeID'), ''),
+                'type_label': eventtypes.labelFor(value(row, 'EventTypeID')),
+                'type_name': eventtypes.identifierFor(value(row, 'EventTypeID')),
+                'is_detection': eventtypes.isDetection(value(row, 'EventTypeID')),
+                'is_annotation': eventtypes.isAnnotation(value(row, 'EventTypeID')),
+                'provocation': eventtypes.provocationFor(value(row, 'EventTypeID')),
                 'category': categories.get(value(row, 'EventCategoryID'), ''),
                 'start_ns': decodeTime(value(row, 'StartSecondHi'),
                                        value(row, 'StartSecondLo')),

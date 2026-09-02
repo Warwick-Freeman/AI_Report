@@ -34,6 +34,8 @@
 ############################################
 import re
 
+import eventtypes
+
 import numpy as np
 
 import interictal
@@ -392,7 +394,7 @@ def _matchesAny(label, patterns):
 
 
 def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
-                        typeIds=None, verbose=True):
+                        typeIds=None, includeReveal=False, verbose=True):
     """Detections read straight out of a study's event database.
 
     This is the route to prefer: the detector can be run during acquisition
@@ -416,23 +418,21 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
     seizureIds = set((typeIds or {}).get('seizure') or ())
 
     events = studyevents.readEvents(studyPath, verbose=False)
-    out, fromTraces, excluded = [], 0, 0
+    out, fromTraces, excluded, reveal = [], 0, 0, 0
     for event in events:
         label = (event.get('type_label') or '').strip()
         typeId = event.get('type_id')
 
         if spikeIds or seizureIds:
             isSpike, isSeizure = typeId in spikeIds, typeId in seizureIds
-        elif not label:
-            # No name for this type, so nothing can be concluded from it. Only
-            # an explicit type id can identify these.
-            continue
         else:
-            if _matchesAny(label, STUDY_TYPE_EXCLUSIONS):
-                excluded += 1
-                continue
-            isSpike = _matchesAny(label, spikePatterns)
-            isSeizure = _matchesAny(label, seizurePatterns)
+            # The plug-in's own event types: eetEEGSpike (74) and eetEEGSeizure
+            # (75). This is what identifies a detection - not the event text,
+            # which is whoever was at the keyboard.
+            isSpike = eventtypes.isSpike(typeId, includeReveal=includeReveal)
+            isSeizure = eventtypes.isSeizure(typeId, includeReveal=includeReveal)
+            if eventtypes.resolveTypeId(typeId)[0] in eventtypes.REVEAL_TYPES:
+                reveal += 1
         if not (isSpike or isSeizure):
             continue
 
@@ -452,8 +452,12 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
         print('--- Detections from the study event database ---')
         print('  %d of %d event(s) matched a detector event type'
               % (len(out), len(events)))
-        if excluded:
-            print('  %d excluded as post-ictal or interictal commentary' % excluded)
+        if reveal and not includeReveal:
+            # A different detector. Counting its output as the cleared
+            # detector's would misattribute it, so it is named and left out.
+            print('  %d Persyst Reveal event(s) present and NOT included - a '
+                  'separate detector. Pass includeReveal=True to score them.'
+                  % reveal)
         if out:
             print('  %d took location from EEGEventGraphs, %d from the event text'
                   % (fromTraces, len(out) - fromTraces))
@@ -462,10 +466,15 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
             for (tid, label), count in sorted(
                     studyevents.summariseTypes(events).items(), key=lambda kv: -kv[1]):
                 print('     %5dx  type %-8s %s' % (count, tid, label or '(unlabelled)'))
-            print('  No event type here names a spike or seizure detector.')
-            print('  If the detector has run on this study, pass typeIds='
-                  '{"spike": [...], "seizure": [...]} with its EventTypeID '
-                  'values. Event text cannot be used to identify detections: it '
-                  'is operator-authored, and most event types carry no name at '
-                  'all. studyevents.describeTypes() shows types with samples.')
+            print('  This study carries no %s (%d) or %s (%d) events, so the '
+                  'Spike and Seizure plug-in has not run on it.'
+                  % (eventtypes.EVENT_TYPES[eventtypes.SPIKE_TYPES[0]][0],
+                     eventtypes.SPIKE_TYPES[0],
+                     eventtypes.EVENT_TYPES[eventtypes.SEIZURE_TYPES[0]][0],
+                     eventtypes.SEIZURE_TYPES[0]))
+            annotations = sum(1 for e in events
+                              if eventtypes.isAnnotation(e.get('type_id')))
+            if annotations:
+                print('  %d event(s) are technologist annotations, which are not '
+                      'detections however they are worded.' % annotations)
     return out

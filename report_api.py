@@ -346,8 +346,11 @@ def conclusionSection(conclusion):
 def eventsSection(studyPath):
     """Study events the reader may carry into the report.
 
-    Every one of these is a human annotation or a system marker. None is a
-    detection, so none is offered as a finding - they are offered as context.
+    Each is named with the word ProfusionEEG itself uses for its type, so the
+    list reads the same way it does in the application rather than as a column
+    of numbers. Detections are marked as such; SCORE provocations - photic,
+    hyperventilation, cortical stimulation - are picked out because section 2
+    wants them recorded.
     """
     events = []
     try:
@@ -357,15 +360,27 @@ def eventsSection(studyPath):
         return events
     for e in raw[:500]:
         start = e.get('start_ns')
+        # A detection is a model's output; an annotation is a person's; a
+        # setting change or a viewing record is neither, and is measured fact
+        # about the recording. The mark follows what the event actually is.
+        if e.get('is_detection'):
+            provenance = MODEL
+        elif e.get('is_annotation'):
+            provenance = HUMAN
+        else:
+            provenance = MEASURED
         events.append({
             'id': 'ev_%s' % e.get('id'),
             'type': e.get('type_label') or ('type %s' % e.get('type_id')),
             'type_id': e.get('type_id'),
+            'type_name': e.get('type_name'),
             'text': e.get('text') or '',
             'seconds': None if start is None else start / 1e9,
             'duration_seconds': (e.get('duration_ns') or 0) / 1e9,
             'channels': e.get('traces') or [],
-            'provenance': HUMAN,
+            'provenance': provenance,
+            'is_detection': bool(e.get('is_detection')),
+            'provocation': e.get('provocation'),
             'included': False,
         })
     return events

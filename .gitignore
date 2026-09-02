@@ -37,3 +37,9 @@ ProfusionEEGSDK/PythonSDK/cmpeeg/cmpeeg/cmpeeg/x64/
 # account for the same reason the SDK does. webui/ carries the ported result.
 /Dark theme and first pass screens/
 /Dark theme and first pass screens.zip
+
+# ProfusionEEG's resource script. Compumedics product source, kept out for the
+# same reason as the SDK. eventtypes.py carries the small derived table this
+# project needs - the event-type numbers and their display strings - so the .rc
+# itself is only required to regenerate it.
+/ProFusionEEG.rc

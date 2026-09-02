@@ -166,6 +166,39 @@ options file that reproduces it alone. Failures are collected into
 runs several at once - each loads its own TensorFlow and uses several cores, so
 2-3 is usually the most that helps.
 
+### Event types
+
+An event in a study carries a numeric `EventTypeID` and nothing that names it.
+`eventtypes.py` holds ProfusionEEG's own event-type table - the `EnumEventType`
+values with the display strings from `ProFusionEEG.rc` - so events read the way
+they do in the application instead of as a column of numbers.
+
+Two entries carry the weight:
+
+| Type | Identifier | Shown as |
+| --- | --- | --- |
+| 74 | `eetEEGSpike` | Spike |
+| 75 | `eetEEGSeizure` | Seizure |
+
+Those are the Spike and Seizure plug-in's own types, and they are what
+identifies a detection. Type 1 is `eetAnnotation` - a technologist's note -
+which is why every study's `EEGEventString` rows sit under that single type: the
+table is the pick-list of annotation texts, not a list of type names.
+
+Persyst Reveal (22-26) and HFO (68) are separate detectors. They are recognised
+and named, and deliberately **not** scored as the cleared detector's output; a
+study carrying them says so in the log.
+
+Some studies store the type with 1000 added. The offset is not assumed - both
+forms are accepted - but it is well evidenced: 1029 carries `0.50` and is
+`eetHighPassFilterChange`, 1031 carries `70` and is `eetLowPassFilterChange`,
+1033 carries `10 s/page` and is `eetTimeBaseChange`, and 1051 carries a user
+name and is `eetViewed`.
+
+`eventtypes.py` is generated. The .rc is Compumedics product source and is
+gitignored; the derived table is committed, so the file is only needed to
+regenerate it.
+
 ### Spike and seizure detections, scored against SCORE
 
 `spikeseizure.py` maps the Compumedics SpikeAndSeizure detector's output onto
