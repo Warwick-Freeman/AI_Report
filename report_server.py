@@ -294,6 +294,19 @@ def applyToResults(results, report):
         if not section.get('included', True):
             excluded.add(section['id'])
             continue
+        if section['id'] == 'recording' and results.get('recording'):
+            # The reader's activation responses live in the section's rows;
+            # without this they would show on screen and not in the document.
+            answers = {}
+            for row in section.get('rows') or []:
+                if row['id'].startswith('activation_') and row.get('override'):
+                    answers[row['label']] = row['override']
+            activation = (results['recording'] or {}).get('activation') or {}
+            for procedure in activation.get('procedures') or []:
+                answer = answers.get('%s response' % procedure['name'])
+                if answer:
+                    procedure['response'] = answer
+
         if section['id'] == 'pdr' and results.get('pdr'):
             for row in section.get('rows') or []:
                 key = row['id'][4:] if row['id'].startswith('pdr_') else None

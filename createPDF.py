@@ -16,6 +16,9 @@ import pdr as pdrScore
 
 mne.viz.set_browser_backend('matplotlib')
 
+from recording import _hms
+
+
 class writePDF:    
     def __init__(self, filename, rawData, epochs, psds, results, dest_folder, sr, chNames, ai_report_text=None, deleteJpg=False):
         self.fileName=filename
@@ -340,6 +343,49 @@ class writePDF:
         # os.system('start '+ outFile)
         
     
+    def writeActivationBlock(self, pdf, fontName, line_height, activation):
+        """SCORE's activation procedures, on the recording page.
+
+        The study records what was done; whether it produced a change is the
+        reader's, and is left as Not scored rather than assumed.
+        """
+        if not activation or not (activation.get('procedures') or []):
+            return
+
+        pdf.ln(2)
+        pdf.set_font(fontName, size=12)
+        self._row(pdf, [('Activation procedures', 196)], line_height - 1)
+        pdf.set_font(fontName, size=9)
+
+        widths = (44, 42, 60, 50)
+        rowHeight = line_height - 1
+        pdf.set_fill_color(232, 234, 240)
+        self._row(pdf, list(zip(('Procedure', 'State', 'Timing', 'Response'),
+                                widths)), rowHeight, fill=True)
+        for procedure in activation['procedures']:
+            timing = ''
+            onset = procedure.get('onset_seconds')
+            if onset is not None:
+                timing = 'from %s' % _hms(onset)
+            self._row(pdf, ((procedure['name'], widths[0]),
+                            (procedure['state'], widths[1]),
+                            (timing, widths[2]),
+                            (procedure.get('response') or 'Not scored', widths[3])),
+                      rowHeight)
+            if procedure.get('detail'):
+                self._subLine(pdf, fontName, procedure['detail'], widths[0],
+                              line_height - 3.5)
+            pdf.set_font(fontName, size=9)
+
+        for note in activation.get('notes') or []:
+            pdf.set_font(fontName, size=8)
+            pdf.set_text_color(105, 105, 105)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(196, line_height - 3.5, align='L', text='   ' + note)
+            pdf.set_x(pdf.l_margin)
+            pdf.set_text_color(0, 0, 0)
+        pdf.set_font(fontName, size=9)
+
     def writePdrPage(self, pdf, fontName, line_height, pdrResult):
         """A page for the posterior dominant rhythm, scored against SCORE.
 
@@ -688,6 +734,9 @@ class writePDF:
             for note in notes:
                 pdf.multi_cell(196, line_height - 2.5, text='- ' + note, align='L')
                 pdf.set_x(pdf.l_margin)
+
+        self.writeActivationBlock(pdf, fontName, line_height,
+                                  (described or {}).get('activation'))
 
     def writeInterictalPage(self, pdf, fontName, line_height, interictalResult):
         """SCORE's Interictal findings folder - abnormal rhythmic activity.

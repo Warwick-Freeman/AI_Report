@@ -199,6 +199,53 @@ name and is `eetViewed`.
 gitignored; the derived table is committed, so the file is only needed to
 regenerate it.
 
+### Recording conditions and activation, from the study events
+
+SCORE section 2 wants the settings the recording was reviewed through and the
+activation procedures performed. A ProfusionEEG study records both as events, so
+both are read from there.
+
+**Review settings.** `FilterSettings.xml` holds one current set and several
+studies carry none at all, so the setting-change events are used as well - they
+carry what was actually applied and when it changed. This fills in Review
+filters, Sensitivity, Time base, Montage sequence and Electrode placement, which
+were previously blank:
+
+```
+Review filters       high pass 0.50 Hz, low pass 70 Hz, notch off
+Sensitivity          10 / 100 / 8 uV/mm (changed 4 times)
+Time base            10 s/page
+Montage sequence     Routine EEG
+```
+
+`eetMontageChange` is deliberately not read as the montage: its text in every
+study examined is `Acquisition PC User` - who made the change, not what it was
+changed to.
+
+**Activation.** Hyperventilation, photic stimulation and cortical stimulation are
+read from their own event types, with the photic frequencies taken from
+`eetPhoticFrequencyChange`:
+
+```
+Hyperventilation      Performed   from 0:24:18   post-procedure marked at 0:39:35, 0:42:39
+Photic stimulation    Performed   from 0:52:31   frequencies 4, 8, 12, 14, 16, 18, 20, 25, 40 Hz;
+                                                 118 s of marked stimulation
+Cortical stimulation  Not recorded in the study
+```
+
+A procedure with no events is reported as **not recorded in the study**, not as
+not performed - the two are different and a study can be annotated
+inconsistently.
+
+**Whether a procedure produced a change is not scored.** SCORE treats a
+photoparoxysmal response, or a build-up on hyperventilation, as a finding for the
+electroencephalographer. Each performed procedure gets a response field the
+reader fills in; until they do it appears in Outstanding, and what they write
+reaches the document. The times are reported so those periods can be found.
+
+Sleep is an activation procedure too and is reported on the sleep page. Sleep
+deprivation is a history item no study records.
+
 ### Spike and seizure detections, scored against SCORE
 
 `spikeseizure.py` maps the Compumedics SpikeAndSeizure detector's output onto

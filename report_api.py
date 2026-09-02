@@ -143,8 +143,13 @@ def _outstanding(rows):
     out = []
     for row in rows:
         if row['provenance'] == NONE:
+            # The value often is the words 'Not scored', which repeated back
+            # explains nothing; the basis says why it could not be scored.
+            reason = row['value'] or 'no value'
+            if _isUndetermined(reason) and row.get('basis'):
+                reason = row['basis']
             out.append({'id': row['id'], 'label': row['label'],
-                        'why': 'Not scored - %s' % (row['value'] or 'no value')})
+                        'why': 'Not scored - %s' % reason})
         elif row['provisional']:
             out.append({'id': row['id'], 'label': row['label'],
                         'why': 'Provisional - %s' % (row['basis'] or 'needs confirmation')})
@@ -182,6 +187,64 @@ def recordingSection(recording):
                          basis='for the technologist or the reader to supply',
                          editable=True, rowId='tech_%s' % label.lower().replace(' ', '_')[:40]))
     return rows, [], recording.get('durations')
+
+
+def activationBlock(activation):
+    """SCORE's activation procedures, ready for display.
+
+    A procedure the study evidences is measured - the events are a record of what
+    was done. Whether it produced a change is the reader's, so that stays human
+    and unscored.
+    """
+    if not activation:
+        return None
+    procedures = []
+    for procedure in activation.get('procedures') or []:
+        performed = procedure.get('performed')
+        procedures.append({
+            'name': procedure['name'],
+            'state': procedure['state'],
+            # Performed-or-not is read from the study; not-recorded is not a
+            # finding either way, so it is marked as not scored.
+            'provenance': MEASURED if performed else NONE,
+            'onset_seconds': _clean(procedure.get('onset_seconds')),
+            'span_seconds': _clean(procedure.get('span_seconds')),
+            'frequencies_hz': _clean(procedure.get('frequencies_hz')),
+            'detail': procedure.get('detail') or '',
+            'basis': procedure.get('basis') or '',
+            'response': procedure.get('response') or 'Not scored',
+            'response_provenance': HUMAN,
+        })
+    return {'procedures': procedures,
+            'notes': list(activation.get('notes') or []),
+            'any_performed': bool(activation.get('any_performed'))}
+
+
+def activationResponseId(name):
+    return 'activation_%s_response' % name.lower().replace(' ', '_')
+
+
+def activationRows(activation):
+    """One row per performed procedure, for the reader to score its response.
+
+    Made rows rather than something alongside them, because rows are what the
+    override and outstanding machinery works on - anything kept beside them was
+    recomputed away on the next read.
+
+    Only performed procedures get a row. Asking for the response to a procedure
+    the study does not record as having happened would be asking for a judgement
+    about nothing.
+    """
+    rows = []
+    for procedure in (activation or {}).get('procedures') or []:
+        if procedure['provenance'] != MEASURED:
+            continue
+        rows.append(_row(
+            '%s response' % procedure['name'], 'Not scored', HUMAN,
+            basis='whether it produced a change is the reader\'s judgement - %s'
+                  % (procedure.get('detail') or procedure.get('basis') or ''),
+            editable=True, rowId=activationResponseId(procedure['name'])))
+    return rows
 
 
 def pdrSection(pdr):
@@ -395,10 +458,13 @@ def buildReport(results, studyPath, options=None):
     sections = []
 
     rows, _, durations = recordingSection(recording)
+    activation = activationBlock(recording.get('activation'))
+    rows.extend(activationRows(activation))
     sections.append({'id': 'recording', 'rows': rows, 'findings': [],
                      'notes': recording.get('notes') or [],
                      'durations': _clean(durations),
-                     'duration_lines': recording.get('duration_lines') or []})
+                     'duration_lines': recording.get('duration_lines') or [],
+                     'activation': activation})
 
     pdrRows = pdrSection(results.get('pdr'))
     sections.append({'id': 'pdr', 'rows': pdrRows, 'findings': [], 'notes': []})
@@ -459,6 +525,7 @@ def buildReport(results, studyPath, options=None):
             # Nothing analyses the conclusion, so it is never 'not analysed' -
             # it is waiting for the reader from the moment the report exists.
             section['state'] = 'populated'
+
         ordered.append(section)
 
     return {

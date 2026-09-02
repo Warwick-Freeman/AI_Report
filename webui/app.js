@@ -586,6 +586,9 @@ function renderSection(id) {
     html += findingsTable(sec);
     html += eventsTable(sec);
     if (id === 'conclusion') html += conclusionHtml(sec);
+    if (id === 'recording' && sec.activation) {
+      html += activationHtml(sec.activation, sec.rows);
+    }
     if (id === 'recording' && sec.duration_lines && sec.duration_lines.length) {
       html += '<h3 class="sub">Duration accounting</h3>';
       sec.duration_lines.forEach(function (l) {
@@ -598,6 +601,45 @@ function renderSection(id) {
   document.getElementById('main').innerHTML = html;
   wireSection(sec);
   wireEmpty();
+}
+
+function activationHtml(activation, rows) {
+  var procedures = activation.procedures || [];
+  if (!procedures.length) return '';
+
+  // The response is a row in the table above; show whatever the reader put
+  // there rather than a second, separate copy of the same answer.
+  function responseFor(name) {
+    var id = 'activation_' + name.toLowerCase().replace(/ /g, '_') + '_response';
+    var match = (rows || []).filter(function (r) { return r.id === id; });
+    return match.length ? (match[0].override || match[0].value) : null;
+  }
+
+  var html = '<h3 class="sub">Activation procedures</h3>' +
+    '<p class="job">What the study records as having been done. Whether a ' +
+    'procedure produced a change is the reader\'s to score - the response ' +
+    'fields are in the table above.</p>' +
+    '<table><thead><tr><th scope="col">Procedure</th><th scope="col">State</th>' +
+    '<th scope="col">Timing</th><th scope="col" class="nowrap">Provenance</th>' +
+    '<th scope="col">Response</th></tr></thead><tbody>';
+  procedures.forEach(function (p) {
+    var timing = (p.onset_seconds === null || p.onset_seconds === undefined)
+      ? '' : 'from ' + seconds(p.onset_seconds);
+    html += '<tr><td class="value">' + esc(p.name) + '</td>' +
+      '<td>' + esc(p.state) + '</td>' +
+      '<td>' + esc(timing) +
+      (p.detail ? '<span class="basis">' + esc(p.detail) + '</span>' : '') +
+      (p.basis ? '<span class="basis">' + esc(p.basis) + '</span>' : '') +
+      '</td><td>' + prov(p.provenance) + '</td>' +
+      '<td class="nowrap">' +
+      prov(p.response_provenance, responseFor(p.name) || p.response) +
+      '</td></tr>';
+  });
+  html += '</tbody></table>';
+  (activation.notes || []).forEach(function (n) {
+    html += '<div class="note">' + esc(n) + '</div>';
+  });
+  return html;
 }
 
 function conclusionHtml(sec) {
