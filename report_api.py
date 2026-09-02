@@ -561,6 +561,73 @@ def outstandingTotal(report):
     return out
 
 
+# The analysis, saved beside the report so it can be re-used.
+#
+# An analysis takes minutes; a document takes seconds once it exists. Saving the
+# results means a study analysed yesterday can be reported today - with different
+# sections included, or different values accepted - without paying for the
+# analysis again.
+ANALYSIS_SUFFIX = '.analysis.json'
+ANALYSIS_FORMAT = 1
+
+
+def analysisPath(destFolder, fileName):
+    stem = os.path.splitext(os.path.basename(fileName))[0]
+    return os.path.join(destFolder, stem + ANALYSIS_SUFFIX)
+
+
+def saveAnalysis(results, destFolder, fileName, study=None, options=None):
+    """Write the analysis results beside the report. Returns the path."""
+    path = analysisPath(destFolder, fileName)
+    payload = {
+        'format': ANALYSIS_FORMAT,
+        'saved': datetime.datetime.now().isoformat(timespec='seconds'),
+        'study': study,
+        'file_name': fileName,
+        'options': _clean(options or {}),
+        'results': _clean(results),
+    }
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=1, default=str)
+    return path
+
+
+def loadAnalysis(destFolder, fileName):
+    """A saved analysis, or None if there is none or it cannot be read."""
+    path = analysisPath(destFolder, fileName)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            payload = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if payload.get('format') != ANALYSIS_FORMAT:
+        return None
+    return payload
+
+
+def describeSavedAnalysis(destFolder, fileName):
+    """What is on disk for this study, for the front end to offer.
+
+    Reports the figures too: without them the document cannot be rebuilt, and a
+    reader offered a restore that then fails has been told something untrue.
+    """
+    payload = loadAnalysis(destFolder, fileName)
+    if not payload:
+        return None
+    import createPDF
+    missing = createPDF.missingFigures(destFolder, fileName)
+    return {
+        'path': analysisPath(destFolder, fileName),
+        'saved': payload.get('saved'),
+        'study': payload.get('study'),
+        'options': payload.get('options') or {},
+        'can_generate': not missing,
+        'missing_figures': missing,
+    }
+
+
 def save(report, path):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1, default=str)

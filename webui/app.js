@@ -29,7 +29,7 @@ var RAIL = [
 
 // What this page needs from the API. The server reports its own; a lower number
 // means the server is running code older than this file.
-var API_EXPECTED = 2;
+var API_EXPECTED = 3;
 
 var PROV_LABEL = {
   measured: 'Measured',
@@ -52,6 +52,11 @@ var S = {
   llm: null,
   stale: false,
   pid: null,
+  // A previous analysis of this study found on disk, and whether this session
+  // is running off one.
+  saved: null,
+  restored: false,
+  canGenerate: true,
   pdf: null,
   data: null,
   error: null,
@@ -99,6 +104,47 @@ function section(id) {
   if (!S.report) return null;
   var found = S.report.sections.filter(function (s) { return s.id === id; });
   return found.length ? found[0] : null;
+}
+
+/* Look for an analysis of this study that has already been run.
+ *
+ * An analysis takes minutes and a document takes seconds once it exists, so a
+ * study analysed earlier should not have to be analysed again just to change
+ * which sections are included or to accept a value differently.
+ */
+function checkSaved() {
+  if (!S.study) {
+    S.saved = null;
+    render();
+    return Promise.resolve();
+  }
+  var q = '?study=' + encodeURIComponent(S.study) +
+    '&dest=' + encodeURIComponent(S.options.dest_pdfPath || './reports');
+  return api('/api/analysis' + q).then(function (r) {
+    S.saved = r.analysis || null;
+    render();
+  }).catch(function () {
+    S.saved = null;
+    render();
+  });
+}
+
+function restoreSaved() {
+  S.error = null;
+  api('/api/restore', { study: S.study, options: S.options })
+    .then(function (r) {
+      S.session = r.id;
+      S.restored = true;
+      S.canGenerate = r.can_generate !== false;
+      S.status = 'ready';
+      writeHash();
+      return refresh();
+    })
+    .then(function () { go('recording'); })
+    .catch(function (e) {
+      S.error = String(e.message || e);
+      render();
+    });
 }
 
 function go(route) {
@@ -210,11 +256,13 @@ function renderStatusBar() {
   var el = document.getElementById('statusbar');
   var text = {
     idle: 'No analysis run yet',
+    restored: 'Loaded a saved analysis',
     running: 'Analysing \u2014 this takes a few minutes',
     generating: 'Writing the document',
     ready: 'Analysis complete',
     failed: 'Analysis failed'
   }[S.status] || S.status;
+  if (S.restored && S.status === 'ready') text = 'Loaded a saved analysis';
   var html = '<span class="dot" data-status="' + esc(S.status) + '"></span><span>' +
     esc(text) + '</span>';
   if (S.study) html += '<span>&middot;</span><span>' + esc(S.study) + '</span>';
@@ -294,6 +342,22 @@ function renderHome() {
                       S.error);
   }
 
+  if (S.saved) {
+    var when = S.saved.saved ? S.saved.saved.replace('T', ' ') : 'earlier';
+    html += '<div class="panel"><h3 class="sub">This study has been analysed before</h3>' +
+      '<p class="job">Analysed ' + esc(when) + '. Loading it takes seconds ' +
+      'and gives the same findings; analysing again takes minutes and is only ' +
+      'needed if the recording or the options have changed.</p>' +
+      (S.saved.can_generate ? '' :
+        '<div class="note">The figures from that analysis are missing from the ' +
+        'output folder (' + esc((S.saved.missing_figures || []).join(', ')) +
+        '), so it can be reviewed but a document cannot be written from it. ' +
+        'Run the analysis again to produce one.</div>') +
+      '<div class="head-actions" style="margin-top:8px">' +
+      '<button class="btn" data-primary id="loadBtn">Load the saved analysis</button>' +
+      '</div></div>';
+  }
+
   html += '<div class="panel"><h3 class="sub">Study</h3>' +
     '<div class="grid"><label class="field" style="flex:1;min-width:340px">' +
     '<span>Study folder or EEG file</span>' +
@@ -338,13 +402,19 @@ function renderHome() {
     input.onchange = function () {
       var key = input.getAttribute('data-opt');
       S.options[key] = input.type === 'checkbox' ? input.checked : input.value;
+      // A different output folder is a different place to look for a previous
+      // analysis.
+      if (key === 'dest_pdfPath') checkSaved();
     };
   });
   document.getElementById('studyPath').onchange = function (e) {
     S.study = e.target.value.trim();
     writeHash();
+    checkSaved();
   };
   document.getElementById('runBtn').onclick = startAnalysis;
+  var load = document.getElementById('loadBtn');
+  if (load) load.onclick = restoreSaved;
   var review = document.getElementById('reviewBtn');
   if (review) review.onclick = function () { go('recording'); };
 }
@@ -719,7 +789,7 @@ function renderOutstanding() {
 }
 
 function renderGenerate() {
-  var ready = S.status === 'ready';
+  var ready = S.status === 'ready' && S.canGenerate;
   var actions = ready
     ? '<button class="btn" data-primary id="genBtn"' + (S.busy ? ' disabled' : '') + '>' +
     (S.busy ? 'Writing\u2026' : 'Generate report') + '</button>'
@@ -728,12 +798,20 @@ function renderGenerate() {
     'Produce the report document from the analysis as you have left it.', actions);
 
   if (!ready) {
-    html += emptyHtml('not-analysed', 'Blocked',
-      'There is no completed analysis to write.',
-      S.status === 'running'
-        ? 'The analysis is still running.'
-        : 'Run the analyses from Report home first.',
-      'Run analyses', 'runFromSection');
+    html += (S.status === 'ready' && !S.canGenerate)
+      ? emptyHtml('failed', 'Blocked',
+          'This analysis cannot be turned into a document.',
+          'It was loaded from disk, but the figures that went with it are no ' +
+          'longer in the output folder. The findings are all here and can be ' +
+          'reviewed; writing a document needs the figures, which only the ' +
+          'analysis can produce. Run it again from Report home.',
+          'Run analyses', 'runFromSection')
+      : emptyHtml('not-analysed', 'Blocked',
+          'There is no completed analysis to write.',
+          S.status === 'running'
+            ? 'The analysis is still running.'
+            : 'Run the analyses from Report home first.',
+          'Run analyses', 'runFromSection');
   } else {
     html += '<div class="panel"><h3 class="sub">Included sections</h3><ul class="plain">';
     S.report.sections.forEach(function (s) {
@@ -916,6 +994,8 @@ function startAnalysis() {
   S.pdf = null;
   S.error = null;
   S.report = null;
+  S.restored = false;
+  S.canGenerate = true;
   S.route = 'analysis';
   render();
   api('/api/analyse', 'POST', { study: S.study, options: S.options })
@@ -939,6 +1019,8 @@ function refresh() {
     S.log = r.log || '';
     S.pdf = r.pdf || null;
     S.data = r.data || null;
+    S.restored = !!r.restored;
+    S.canGenerate = r.can_generate !== false;
     S.busy = r.status === 'generating';
     if (r.report) S.report = r.report;
     if (r.outstanding) S.outstanding = r.outstanding;
@@ -1058,6 +1140,7 @@ api('/api/config').then(function (c) {
     });
   }
   render();
+  checkSaved();
 }).catch(function (e) {
   document.getElementById('main').innerHTML =
     '<div class="empty" data-kind="failed"><span class="kind">Error</span>' +

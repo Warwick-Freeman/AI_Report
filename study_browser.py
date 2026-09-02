@@ -172,6 +172,17 @@ class StudyBrowser(QMainWindow):
         # UI instead, where the reader works through the SCORE sections, accepts
         # or overrides each value, and only then generates. Both routes run the
         # same analysis.
+        # Analysis without a document. The analysis is the expensive part and
+        # is saved, so a report can be produced from it later without running
+        # it again - which is what the review front end then does.
+        self.analyseButton = QPushButton('Run analysis only')
+        self.analyseButton.setToolTip(
+            'Run the analysis and save it, without writing a report. The saved '
+            'analysis can be reported later without analysing again.')
+        self.analyseButton.clicked.connect(self.runAnalysisOnly)
+        self.analyseButton.setEnabled(False)
+        actions.addWidget(self.analyseButton)
+
         self.reviewButton = QPushButton('Review in report UI...')
         self.reviewButton.setToolTip(
             'Open the study in the SCORE review front end, where findings can '
@@ -461,6 +472,7 @@ class StudyBrowser(QMainWindow):
         study = self.selectedStudy()
         usable = bool(study) and study.get('exists', False)
         self.generateButton.setEnabled(usable and self.process is None)
+        self.analyseButton.setEnabled(usable and self.process is None)
         # The review UI runs its own analysis in its own process, so it does not
         # care whether a batch run is in progress here.
         self.reviewButton.setEnabled(usable)
@@ -682,7 +694,11 @@ class StudyBrowser(QMainWindow):
 
     # --------------------------------------------------------------- running
 
-    def generate(self):
+    def runAnalysisOnly(self):
+        """Run the analysis and save it, without writing a report."""
+        self.generate(analysisOnly=True)
+
+    def generate(self, analysisOnly=False):
         if self.process is not None:
             return
         study = self.selectedStudy()
@@ -703,6 +719,9 @@ class StudyBrowser(QMainWindow):
 
         try:
             options = self.collectOptions(study)
+            # Analysis without a document. The runner saves the analysis either
+            # way, so this only decides whether a report is written now.
+            options['analysisOnly'] = bool(analysisOnly)
         except ValueError as e:
             QMessageBox.warning(self, 'Check the options', str(e))
             return

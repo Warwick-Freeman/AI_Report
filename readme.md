@@ -626,6 +626,36 @@ without a provider.
 
 No key is ever sent to the front end.
 
+#### Analyse once, report many times
+
+The analysis is the expensive part - minutes - and the document is seconds once
+it exists. So every run saves its analysis beside the report as
+`<study>.analysis.json`, together with the figures it drew. A study analysed
+earlier can then be reported again without analysing it a second time: to
+include different sections, to accept a value differently, or simply because the
+first report was lost.
+
+Report home checks for a saved analysis whenever the study or the output folder
+changes and offers to load it. Loading takes a few seconds against a few minutes:
+
+```
+ANALYSE  ready in 185 s
+RESTORE  6.8 s
+GENERATE 4.0 s
+```
+
+The study browser has **Run analysis only**, which analyses and saves without
+writing a document; `study_runner.py` takes the same thing as `analysisOnly`.
+
+The figures are named after the study - `05JC_eeg0.jpg` and so on. They used to
+be `eeg0.jpg` in the output folder, shared by every study reported into it, which
+was survivable only while a report was written in the same run that drew them.
+Once an analysis could be restored, reporting a second study would have put the
+first one's figures into it.
+
+If the figures are gone the analysis still loads and can be reviewed, and the
+Generate screen says why a document cannot be written from it.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,

@@ -43,7 +43,7 @@ import report_api
 # it started with. A new front end then talks to an old API and misreads what it
 # gets back - a missing field looks like an empty one. The page compares this
 # against what it expects and says to restart rather than guessing.
-API_VERSION = 2
+API_VERSION = 3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
@@ -192,9 +192,25 @@ def runAnalysis(sessionId, study, options):
             raw, results = report.process()
             report.raw = raw
 
+            # Draw the figures now, while the epochs are still in memory, and
+            # save the results beside them. That is what lets a later session
+            # rebuild the document without analysing the recording again - and
+            # the figures would be written at generate time anyway.
+            saved = None
+            try:
+                report.drawFigures()
+                saved = report_api.saveAnalysis(
+                    results, report.dest_pdfPath, report.fileName,
+                    study=study, options=options)
+                print('Analysis saved: %s' % saved)
+            except Exception as e:
+                print('Could not save the analysis for re-use: %s: %s'
+                      % (type(e).__name__, e))
+
             with LOCK:
                 session['instance'] = report
                 session['report'] = report_api.buildReport(results, study, options)
+                session['saved'] = saved
                 session['status'] = 'ready'
     except Exception as e:
         with LOCK:
@@ -219,33 +235,46 @@ def generateDocument(sessionId):
 
     session = SESSIONS[sessionId]
     instance = session.get('instance')
-    if instance is None:
+    restored = session.get('restored')
+    if instance is None and not restored:
         raise RuntimeError('nothing analysed in this session')
 
-    folder, folderError = ensureOutputFolder(instance.dest_pdfPath)
+    folder, folderError = ensureOutputFolder(
+        instance.dest_pdfPath if instance else restored['dest'])
     if folderError:
         with LOCK:
             session['status'] = 'ready'
             session['error'] = folderError
         return
-    instance.dest_pdfPath = folder
+    if instance:
+        instance.dest_pdfPath = folder
+    else:
+        restored['dest'] = folder
 
     applied = report_api.applyOverrides(session['report'], session.get('overrides'))
     session['report'] = applied
-    applyToResults(instance.results, applied)
+    applyToResults(instance.results if instance else restored['results'], applied)
 
     tee = Tee(session, sys.__stdout__)
     try:
         with DRAW, contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
-            instance.outputPdf = True
-            # The path comes back from the writer. Rebuilding it here meant
-            # agreeing with createPDF about how a filename is truncated, and a
-            # study name containing a dot broke that agreement: the document was
-            # written and this reported that it was not.
-            pdf = instance.writeDocument()
+            if instance:
+                instance.outputPdf = True
+                # The path comes back from the writer. Rebuilding it here meant
+                # agreeing with createPDF about how a filename is truncated, and
+                # a study name containing a dot broke that agreement: the
+                # document was written and this reported that it was not.
+                pdf = instance.writeDocument()
+            else:
+                # No signal in memory - the figures on disk are the analysis.
+                import createPDF
+                written = createPDF.writePDFFromSaved(
+                    restored['file_name'], restored['results'], folder)
+                pdf = written.outFile
         pdf = pdf if (pdf and os.path.isfile(pdf)) else None
+        fileName = instance.fileName if instance else restored['file_name']
         stem = os.path.splitext(os.path.basename(pdf))[0] if pdf \
-            else os.path.splitext(instance.fileName)[0]
+            else os.path.splitext(fileName)[0]
 
         # The structured SCORE data file, written beside the document. The
         # document is for a person; this is the same report as data, carrying
@@ -253,8 +282,7 @@ def generateDocument(sessionId):
         # document states but cannot be queried for.
         data = None
         try:
-            data = os.path.abspath(os.path.join(instance.dest_pdfPath,
-                                                stem + '.score.json'))
+            data = os.path.abspath(os.path.join(folder, stem + '.score.json'))
             report_api.save(applied, data)
         except OSError as e:
             tee.write('Could not write the SCORE data file: %s\n' % e)
@@ -271,8 +299,8 @@ def generateDocument(sessionId):
                 session['error'] = (
                     'No document was written. The writer reported %r and the '
                     'output folder is %r - check that folder is writable.'
-                    % (getattr(instance, 'documentPath', None),
-                       os.path.abspath(instance.dest_pdfPath)))
+                    % (getattr(instance, 'documentPath', None) if instance else None,
+                       folder))
     except Exception as e:
         with LOCK:
             session['status'] = 'ready'
@@ -431,6 +459,17 @@ class Handler(BaseHTTPRequestHandler):
                 },
             })
 
+        if path == '/api/analysis':
+            study = (query.get('study') or '').strip()
+            folder, folderError = ensureOutputFolder(query.get('dest'))
+            if not study:
+                return self._send(400, {'error': 'no study given'})
+            fileName = os.path.basename(study.rstrip('/\\'))
+            described = None if folderError else report_api.describeSavedAnalysis(
+                folder, fileName)
+            return self._send(200, {'study': study, 'dest': folder,
+                                    'analysis': described})
+
         if path == '/api/studies':
             return self._send(200, self._studies(query.get('root')))
 
@@ -454,6 +493,10 @@ class Handler(BaseHTTPRequestHandler):
                 'study': session['study'],
                 'pdf': session.get('pdf'),
                 'data': session.get('data'),
+                'restored': bool(session.get('restored')),
+                'saved': session.get('saved'),
+                'can_generate': (session.get('restored') or {}).get('can_generate', True)
+                                if session.get('restored') else True,
             }
             if session.get('report'):
                 report = report_api.applyOverrides(session['report'],
@@ -511,6 +554,45 @@ class Handler(BaseHTTPRequestHandler):
                                       daemon=True)
             thread.start()
             return self._send(200, {'id': sessionId, 'status': 'running'})
+
+        if path == '/api/restore':
+            study = (body.get('study') or '').strip()
+            folder, folderError = ensureOutputFolder(
+                (body.get('options') or {}).get('dest_pdfPath'))
+            if folderError:
+                return self._send(400, {'error': folderError})
+            fileName = os.path.basename(study.rstrip('/\\'))
+            payload = report_api.loadAnalysis(folder, fileName)
+            if not payload:
+                return self._send(404, {
+                    'error': 'No saved analysis for %s in %s.'
+                             % (fileName, folder)})
+            import createPDF
+            missing = createPDF.missingFigures(folder, fileName)
+            sessionId = uuid.uuid4().hex[:12]
+            results = payload.get('results') or {}
+            SESSIONS[sessionId] = {
+                'status': 'ready', 'log': [], 'study': study, 'overrides': {},
+                'instance': None,
+                'restored': {'results': results, 'dest': folder,
+                             'file_name': payload.get('file_name') or fileName,
+                             'saved': payload.get('saved'),
+                             'can_generate': not missing},
+                'report': report_api.buildReport(results, study,
+                                                 payload.get('options')),
+                'saved': report_api.analysisPath(folder, fileName),
+            }
+            note = ('Loaded the analysis of %s saved %s. The recording was not '
+                    'analysed again.' % (fileName, payload.get('saved')))
+            if missing:
+                note += (' The figures are missing from the output folder (%s), '
+                         'so a document cannot be written until the analysis is '
+                         're-run.' % ', '.join(missing))
+            SESSIONS[sessionId]['log'].append(note + '\n')
+            print(note)
+            return self._send(200, {'id': sessionId, 'status': 'ready',
+                                    'restored': True,
+                                    'can_generate': not missing})
 
         if path.startswith('/api/session/'):
             parts = path.split('/')

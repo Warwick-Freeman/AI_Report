@@ -18,9 +18,50 @@ mne.viz.set_browser_backend('matplotlib')
 
 from recording import _hms
 
+# The figures writePDF draws. A saved analysis can only be turned back into a
+# document while these are still beside it.
+FIGURE_COUNT = 6
+
+
+def figureNames(fileName):
+    """The report's figure filenames for one study.
+
+    Named after the study, because a saved analysis is re-used later and several
+    studies share an output folder. While these were eeg0.jpg .. eeg5.jpg,
+    reporting a second study overwrote the first one's figures - which only
+    mattered once analyses could be restored, and then it would have put one
+    patient's figures into another's report.
+    """
+    stem = os.path.splitext(os.path.basename(fileName or 'report'))[0]
+    return ['%s_eeg%d.jpg' % (stem, i) for i in range(FIGURE_COUNT)]
+
+
+def missingFigures(dest_folder, fileName):
+    """Which of a study's figures are not in a folder."""
+    return [name for name in figureNames(fileName)
+            if not os.path.isfile(os.path.join(dest_folder, name))]
+
+
+def writePDFFromSaved(filename, results, dest_folder, ai_report_text=None):
+    """Rebuild the document from an analysis that has already run.
+
+    Everything the pages need is in results; only the figures need the signal,
+    and those are on disk from when the analysis ran. So a study analysed
+    yesterday can be reported today - with different sections included, or
+    different values accepted - without paying for the analysis again.
+    """
+    missing = missingFigures(dest_folder, filename)
+    if missing:
+        raise OSError('The figures from that analysis are missing from %s (%s). '
+                      'Re-run the analysis.'
+                      % (os.path.abspath(dest_folder), ', '.join(missing)))
+    return writePDF(filename, None, None, None, results, dest_folder, None, None,
+                    ai_report_text=ai_report_text, drawFigures=False)
+
 
 class writePDF:    
-    def __init__(self, filename, rawData, epochs, psds, results, dest_folder, sr, chNames, ai_report_text=None, deleteJpg=False):
+    def __init__(self, filename, rawData, epochs, psds, results, dest_folder, sr, chNames, ai_report_text=None, deleteJpg=False,
+                 drawFigures=True):
         self.fileName=filename
         
         # print ('eegFullNmae: ', self.eegFullNmae)
@@ -47,15 +88,24 @@ class writePDF:
         if not os.path.isdir(dest_folder):
             raise OSError('The output folder %r is not a folder'
                           % os.path.abspath(dest_folder))
-        self.dest_folder=dest_folder  
+        self.dest_folder=dest_folder
         self.results=results
+        # Figure paths, named after this study so two studies reported into one
+        # output folder cannot overwrite each other's - which matters now that a
+        # saved analysis is re-used later to rebuild a document.
+        self.figures=[dest_folder + name for name in figureNames(filename)]
 
-        self.drawEpochs(epochs)
-        self.drawPsds(psds)
-        self.drawLeftRightDiff(results['LR_alpha_ratio'], results['LR_theta_ratio'], results['LR_delta_ratio'], results['alphaDiffChannels'])
-        self.drawFreqPower(psds)
-        self.plotTopMaps(epochs)
-        self.plotSpectrogram(rawData, sr, chNames)
+        # The figures need the epochs, which only exist while the analysis is
+        # in memory. Drawing is skipped when a document is rebuilt from an
+        # analysis that has already run: the figures are on disk beside the
+        # report, and re-deriving them would mean re-analysing the recording.
+        if drawFigures:
+            self.drawEpochs(epochs)
+            self.drawPsds(psds)
+            self.drawLeftRightDiff(results['LR_alpha_ratio'], results['LR_theta_ratio'], results['LR_delta_ratio'], results['alphaDiffChannels'])
+            self.drawFreqPower(psds)
+            self.plotTopMaps(epochs)
+            self.plotSpectrogram(rawData, sr, chNames)
         self.ai_report_text=ai_report_text
         self.deleteJpg=deleteJpg
         
@@ -63,8 +113,7 @@ class writePDF:
         self.savePDF(results)  
         # delete eeg jpg
         if deleteJpg:
-            for jpg in ['eeg0.jpg','eeg1.jpg', 'eeg2.jpg', 'eeg3.jpg', 'eeg4.jpg', 'eeg5.jpg']:
-                jpgFile= self.dest_folder+jpg
+            for jpgFile in self.figures:
                 if os.path.exists(jpgFile):
                     try: 
                         os.remove(jpgFile)
@@ -129,8 +178,8 @@ class writePDF:
         # pdf.cell(196, line_height-3, text=self.fileName, ln=1, align='C' )
         # Three figures stacked: give each what is left after the ones above it,
         # so the last one shrinks rather than running off the page.
-        for figure in ('eeg0.jpg', 'eeg1.jpg', 'eeg2.jpg'):
-            self._placeImage(pdf, self.dest_folder + figure)
+        for figure in self.figures[:3]:
+            self._placeImage(pdf, figure)
 
         
         # The structured findings are the substance of the report, so they are
@@ -304,21 +353,21 @@ class writePDF:
         pdf.cell(0, line_height, text='EEG, 4s/epochs', ln=1, align='C')
         # A square figure at full landscape width would be 280 mm tall on a
         # 210 mm page, so it has to be fitted to the height as well.
-        self._placeImage(pdf, self.dest_folder + 'eeg5.jpg', top=20)
+        self._placeImage(pdf, self.figures[5], top=20)
 
         # 第二頁
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
         pdf.cell(0, 20, text='Topography and Power Spectrum', ln=1, align='C')
-        self._placeImage(pdf, self.dest_folder + 'eeg3.jpg', top=25)
+        self._placeImage(pdf, self.figures[3], top=25)
 
         # 第三頁
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
         pdf.cell(0, 20, text='Spectrogram', ln=1, align='C')
-        self._placeImage(pdf, self.dest_folder + 'eeg4.jpg', top=25)
+        self._placeImage(pdf, self.figures[4], top=25)
         self.writePdrPage(pdf, fontName, line_height, wanted('pdr', results.get('pdr')))
         self.writeInterictalPage(pdf, fontName, line_height, wanted('interictal', results.get('interictal')))
         self.writeEpisodesPage(pdf, fontName, line_height, wanted('episodes', (results.get('spikeseizure') or {}).get('episodes')))
@@ -1264,7 +1313,7 @@ class writePDF:
             
         # plt.show()
         plt.legend(legends)
-        jpgFile=self.dest_folder+'eeg2.jpg'
+        jpgFile=self.figures[2]
         plt.savefig(jpgFile, dpi=300)
         plt.close()
     
@@ -1284,7 +1333,7 @@ class writePDF:
                         overview_mode='hidden', show_scrollbars=False, epoch_colors=colorList)
             
             # fig.grab().save('eeg5.jpg')
-            jpgFile=self.dest_folder+'eeg5.jpg'
+            jpgFile=self.figures[5]
             fig.savefig(jpgFile, dpi=300)
             plt.close()
 
@@ -1315,7 +1364,7 @@ class writePDF:
         plt.title('Left/Right power ratio, left is positive', fontsize=18)
 
         # Append the figure to the list
-        jpgFile=self.dest_folder+'eeg1.jpg'
+        jpgFile=self.figures[1]
         plt.savefig(jpgFile, dpi=300)
         plt.close()
 
@@ -1359,7 +1408,7 @@ class writePDF:
         plot_psds(['F7'], ['F8'], fig.add_subplot(gs[2,2:4]))
         plot_psds(['F3'], ['F4'], fig.add_subplot(gs[3,0:2]))
         plot_psds(['Fp1'], ['Fp2'], fig.add_subplot(gs[3,2:4]))
-        jpgFile=self.dest_folder+'eeg3.jpg'
+        jpgFile=self.figures[3]
         plt.savefig(jpgFile, dpi=72)
         plt.close()
 
@@ -1384,7 +1433,7 @@ class writePDF:
             # plt pink line at y=8
             plt.axhline(y=8, color='darkred', linestyle='--')
             plt.colorbar(label='Power [dB/Hz]')
-        jpgFile=self.dest_folder+'eeg4.jpg'
+        jpgFile=self.figures[4]
         plt.savefig(jpgFile, dpi=72)
         plt.close()
 
@@ -1446,7 +1495,7 @@ class writePDF:
                 ax[i,j].text(-max(x), min(y), 'Left O', color='black')  
 
         # ax[0,0].text(3*max(x), 1.8*max(y),'Power spectrum density', fontsize=20, color='black')
-        jpgFile=self.dest_folder+'eeg0.jpg'
+        jpgFile=self.figures[0]
         fig.savefig(jpgFile, dpi=300)
         plt.close()
         

@@ -280,10 +280,14 @@ def scoreSpikesAndSeizures(detections, analysedSeconds, sampleRate=None,
     for detection in seizures:
         start, duration = detection.seconds(sampleRate)
         location, counts, _ = _locationOver([detection])
-        channelCount = None
-        match = re.search(r'\((\d+)\)', detection.annotation or '')
-        if match:
-            channelCount = int(match.group(1))
+        # How many channels the seizure involved. The detector writes it as
+        # 'Active channels: 6' in the event text, which detectionsFromStudy
+        # keeps; older annotations carried it as 'Seizure (6)'.
+        channelCount = getattr(detection, 'activeChannels', None)
+        if channelCount is None:
+            match = re.search(r'\((\d+)\)', detection.annotation or '')
+            if match:
+                channelCount = int(match.group(1))
         basis = 'seizure detector'
         if channelCount is not None:
             basis += ', %d channel(s) active' % channelCount
@@ -418,6 +422,14 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
     seizureIds = set((typeIds or {}).get('seizure') or ())
 
     events = studyevents.readEvents(studyPath, verbose=False)
+
+    # A detection is stored as a start event carrying the duration plus an end
+    # event at start+duration with a duration of zero. Keeping both turned four
+    # real seizures in 05JC.eeg into eight episodes, four of them zero-length -
+    # which would have read as four extra seizures in the report.
+    endEvents = sum(1 for e in events if e.get('is_end_event'))
+    events = [e for e in events if not e.get('is_end_event')]
+
     out, fromTraces, excluded, reveal = [], 0, 0, 0
     for event in events:
         label = (event.get('type_label') or '').strip()
@@ -439,19 +451,34 @@ def detectionsFromStudy(studyPath, spikeTypes=None, seizureTypes=None,
         start = (event['start_ns'] or 0) / 1e9
         duration = (event['duration_ns'] or 0) / 1e9
         channels = list(event.get('traces') or [])
+        text = event.get('text') or ''
+        activeChannels = None
         if channels:
             fromTraces += 1
         else:
-            channels = parseAnnotationChannels(event.get('text'))
-        out.append(Detection(
+            channels = parseAnnotationChannels(text)
+            if not channels:
+                # The seizure detector writes 'Active channels: 6' - how many
+                # were involved, not which. That is worth reporting as a count;
+                # it is not a location, and is not made into one.
+                match = re.search(r'active channels?\s*:\s*(\d+)', text, re.I)
+                if match:
+                    activeChannels = int(match.group(1))
+        detection = Detection(
             startSeconds=start, endSeconds=start + duration,
-            annotation=('Seizure' if isSeizure else (event.get('text') or '')),
-            channels=channels, typeCode=typeId, index=event.get('id')))
+            annotation=('Seizure' if isSeizure else text),
+            channels=channels, typeCode=typeId, index=event.get('id'))
+        detection.activeChannels = activeChannels
+        out.append(detection)
 
     if verbose:
         print('--- Detections from the study event database ---')
         print('  %d of %d event(s) matched a detector event type'
               % (len(out), len(events)))
+        if endEvents:
+            print('  %d end event(s) dropped - a detection is stored as a start '
+                  'and an end event, and counting both would double it'
+                  % endEvents)
         if reveal and not includeReveal:
             # A different detector. Counting its output as the cleared
             # detector's would misattribute it, so it is named and left out.

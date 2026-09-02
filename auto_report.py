@@ -631,6 +631,44 @@ class CreateReport:
 
         return raw, results
 
+    def drawFigures(self):
+        """Draw the report's figures without assembling the document.
+
+        Called after the analysis so the figures land beside the report while
+        the epochs are still in memory. They are what makes a saved analysis
+        re-usable: with the figures and the results on disk, a document can be
+        rebuilt later without analysing the recording again.
+        """
+        if not getattr(self, '_documentInputs', None):
+            raise RuntimeError('nothing analysed yet - call process() first')
+
+        import createPDF
+        from createPDF import writePDF as _writePDF
+        inputs = self._documentInputs
+        # A writePDF is constructed only for its drawing; the pages are not
+        # assembled here. deleteJpg stays off - the figures are the point.
+        drawer = _writePDF.__new__(_writePDF)
+        drawer.fileName = self.fileName
+        folder = self.dest_pdfPath
+        if folder and folder[-1] not in ('\\', '/'):
+            folder += '/' if '/' in folder else '\\'
+        os.makedirs(folder, exist_ok=True)
+        drawer.dest_folder = folder
+        drawer.results = self.results
+        drawer.figures = [folder + name
+                          for name in createPDF.figureNames(self.fileName)]
+        drawer.drawEpochs(inputs['epochs'])
+        drawer.drawPsds(inputs['psds'])
+        drawer.drawLeftRightDiff(self.results['LR_alpha_ratio'],
+                                 self.results['LR_theta_ratio'],
+                                 self.results['LR_delta_ratio'],
+                                 self.results['alphaDiffChannels'])
+        drawer.drawFreqPower(inputs['psds'])
+        drawer.plotTopMaps(inputs['epochs'])
+        drawer.plotSpectrogram(inputs['rawData'], inputs['sample_rate'],
+                               inputs['ch_names'])
+        return folder
+
     def writeDocument(self):
         """Write the report document from the analysis already in memory.
 

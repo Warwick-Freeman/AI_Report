@@ -48,6 +48,10 @@ DEFAULTS = {
     # Sleep staging and sleep graphoelements. 'usleep' or 'yasa'.
     'stageSleep': True,
     'sleepBackend': 'usleep',
+    # Run the analysis and save it, without writing a document. The saved
+    # analysis can be turned into a report later - in the review front end, or
+    # by running again - without analysing the recording a second time.
+    'analysisOnly': False,
 }
 
 
@@ -163,6 +167,9 @@ def run(options):
     if not filePath:
         filePath = '.'
 
+    if options['analysisOnly']:
+        options['outputPdf'] = False
+
     print('Study   : %s' % study)
     print('Output  : %s' % os.path.abspath(options['dest_pdfPath']))
     print('Options : %s' % json.dumps({k: v for k, v in options.items()
@@ -190,6 +197,24 @@ def run(options):
                  autoEyeState=options['autoEyeState'],
                  stageSleep=options['stageSleep'],
                  sleepBackend=options['sleepBackend'])
+
+    # Save the analysis so it can be reported later without running again. The
+    # figures go with it: they need the epochs, which only exist now.
+    try:
+        import report_api
+        report.drawFigures()
+        saved = report_api.saveAnalysis(report.results, options['dest_pdfPath'],
+                                        fileName, study=study, options=options)
+        print('-' * 70)
+        print('ANALYSIS_SAVED: %s' % saved)
+    except Exception as e:
+        print('Could not save the analysis for re-use: %s: %s'
+              % (type(e).__name__, e))
+
+    if options['analysisOnly']:
+        print('Analysis only - no document written. Open the study in the '
+              'review front end to report it.')
+        return 0
 
     if options['outputPdf']:
         # The path the writer actually used, falling back to the expected one
