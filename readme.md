@@ -456,7 +456,16 @@ works offline. Ported from the Claude Design prototype in
 `Dark theme and first pass screens/`, which rendered through a design-compiler
 runtime that pulls React, ReactDOM and Babel from unpkg at load - right for a
 design preview, wrong for a clinical tool that must draw a screen with the
-network down. The palette is that design's, verbatim, in both themes.
+network down.
+
+The layout and component language are that design's. The palette is not: it
+follows the Compumedics applications this panel sits beside - ProDigi's purple
+header and Profusion EEG's indigo ribbon - rather than the AH790 brand guide's
+two blues, so the report reads as part of the software already open on the
+screen. The app bar keeps that purple in both themes; everything else is a
+violet-tinted neutral so the panel never becomes the brightest object beside a
+waveform view. Provenance keeps its own hues, deliberately away from the violet
+chrome. Every foreground/background pair is checked against WCAG 2.1 AA.
 
 #### Provenance
 

@@ -1,27 +1,43 @@
-/* Palette taken verbatim from the design prototype, both themes.
-   Everything else here is that design's inline styles turned into classes. */
+/* Palette.
+   Drawn from the Compumedics applications this panel sits beside - ProDigi's
+   deep purple header and Profusion EEG's indigo ribbon - rather than from the
+   AH790 brand guide's two blues, so the report reads as part of the software a
+   clinician already has open.
+
+   The app bar keeps the same purple in both themes, which is the strongest
+   identity cue in both applications. Everything else is a violet-tinted neutral
+   so the panel never becomes the brightest thing beside a waveform view.
+
+   Provenance keeps its own hues - blue, amber, teal - deliberately away from the
+   violet chrome, so a mark is never confused with an accent. Every pair here is
+   checked against WCAG 2.1 AA; the border-strong values are the weakest and pass
+   the 3:1 required of non-text UI. */
 :root{
-  --p-canvas:#0A121B; --p-surface:#101C29; --p-raised:#17293A; --p-sunken:#070E15;
-  --p-text-primary:#E6EDF4; --p-text-secondary:#9BB0C4; --p-text-disabled:#61798F;
-  --p-border-subtle:#1D3143; --p-border-strong:#33526C;
-  --p-accent:#3FBBEF; --p-accent-quiet:#12384f; --p-focus:rgba(0,163,224,.55);
+  --p-canvas:#150F24; --p-surface:#1C1530; --p-raised:#251C3F; --p-sunken:#0E0A19;
+  --p-text-primary:#ECE7F6; --p-text-secondary:#AFA4C8; --p-text-disabled:#7C6F98;
+  --p-border-subtle:#2D2447; --p-border-strong:#71619D;
+  --p-accent:#9C86F5; --p-accent-quiet:#2A2050; --p-on-accent:#170E2E;
+  --p-focus:rgba(156,134,245,.55);
   --p-prov-measured:#4FC3F0; --p-prov-model:#FFB347; --p-prov-human:#35C6C4;
   --p-prov-measured-bg:rgba(79,195,240,.10); --p-prov-model-bg:rgba(255,179,71,.10); --p-prov-human-bg:rgba(53,198,196,.10);
   --p-success:#2FB6A8; --p-warning:#FF9E15; --p-error:#F2789F; --p-info:#4FC3F0;
-  --p-band:#22394d;
+  --p-band:#2E2450;
+  --p-appbar:#3B1F63; --p-appbar-fg:#F3EFFA; --p-appbar-dim:#BFAEDA;
   --p-notice-bg:#FF9E15; --p-notice-fg:#231F20; --p-notice-rule:#231F20;
   color-scheme:dark;
 }
 :root[data-theme="light"],[data-theme="light"]{
-  --p-canvas:#F2F5F8; --p-surface:#FFFFFF; --p-raised:#FFFFFF; --p-sunken:#E7ECF2;
-  --p-text-primary:#231F20; --p-text-secondary:#5C6B78; --p-text-disabled:#98A6B2;
-  --p-border-subtle:#DEE3EB; --p-border-strong:#99B1C6;
-  --p-accent:#00A3E0; --p-accent-quiet:#E6F6FC; --p-focus:rgba(0,163,224,.45);
-  --p-prov-measured:#2383C5; --p-prov-model:#A85D00; --p-prov-human:#007B84;
-  --p-prov-measured-bg:rgba(35,131,197,.08); --p-prov-model-bg:rgba(168,93,0,.08); --p-prov-human-bg:rgba(0,123,132,.08);
-  --p-success:#008583; --p-warning:#A85D00; --p-error:#B00060; --p-info:#2383C5;
-  --p-band:#E3E9EF;
-  --p-notice-bg:#FFEEDB; --p-notice-fg:#4A2A00; --p-notice-rule:#A85D00;
+  --p-canvas:#F4F2FA; --p-surface:#FFFFFF; --p-raised:#FFFFFF; --p-sunken:#EBE7F6;
+  --p-text-primary:#1E1830; --p-text-secondary:#585070; --p-text-disabled:#8C82A6;
+  --p-border-subtle:#E1DCEF; --p-border-strong:#8C81B2;
+  --p-accent:#5A45C4; --p-accent-quiet:#EDE8FB; --p-on-accent:#FFFFFF;
+  --p-focus:rgba(90,69,196,.45);
+  --p-prov-measured:#1F6FA8; --p-prov-model:#8A4B00; --p-prov-human:#00696F;
+  --p-prov-measured-bg:rgba(31,111,168,.08); --p-prov-model-bg:rgba(138,75,0,.08); --p-prov-human-bg:rgba(0,105,111,.08);
+  --p-success:#00696F; --p-warning:#8A4B00; --p-error:#A10052; --p-info:#1F6FA8;
+  --p-band:#E4DEF4;
+  --p-appbar:#3B1F63; --p-appbar-fg:#F3EFFA; --p-appbar-dim:#C6B7DE;
+  --p-notice-bg:#FFEEDB; --p-notice-fg:#4A2A00; --p-notice-rule:#8A4B00;
   color-scheme:light;
 }
 
@@ -45,13 +61,20 @@ button,input,select,textarea{font:inherit;font-variant-numeric:tabular-nums;colo
 /* The --p-notice-* tokens above are kept - they are part of the design's
    palette - but the banner they styled has been removed from the page. */
 
-.studybar{padding:10px 16px;border-bottom:1px solid var(--p-border-subtle);
-  background:var(--p-raised);display:flex;flex-wrap:wrap;gap:4px 22px;align-items:baseline}
-.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--p-text-secondary)}
+/* The application bar. ProDigi and Profusion EEG both open with a purple bar
+   carrying the study's identity, and keeping it here - the same purple in both
+   themes - is what makes this read as part of that software rather than as an
+   embedded web page. */
+.studybar{padding:10px 16px;border-bottom:1px solid rgba(0,0,0,.35);
+  background:var(--p-appbar);color:var(--p-appbar-fg);
+  display:flex;flex-wrap:wrap;gap:4px 22px;align-items:baseline}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--p-appbar-dim)}
 .fact{display:flex;flex-direction:column}
-.fact-k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--p-text-secondary)}
-.fact-v{font-size:12.5px}
+.fact-k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--p-appbar-dim)}
+.fact-v{font-size:12.5px;color:var(--p-appbar-fg)}
 .studybar h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.studybar button.mini{border-color:var(--p-appbar-dim);color:var(--p-appbar-fg)}
+.studybar button.mini:hover{background:rgba(255,255,255,.12)}
 .spacer{flex:1}
 
 .body{display:flex;flex:1;align-items:stretch;min-height:0}
@@ -103,7 +126,7 @@ td.value{font-weight:600}
 button.btn{padding:5px 12px;border-radius:2px;border:1px solid var(--p-border-strong);
   cursor:pointer;font-size:12px;background:transparent;color:var(--p-text-primary)}
 button.btn:hover{background:var(--p-accent-quiet)}
-button.btn[data-primary]{background:var(--p-accent);border-color:var(--p-accent);color:#04121B;font-weight:600}
+button.btn[data-primary]{background:var(--p-accent);border-color:var(--p-accent);color:var(--p-on-accent);font-weight:600}
 button.btn[data-primary]:hover{filter:brightness(1.08)}
 button.btn:disabled{opacity:.45;cursor:not-allowed}
 button.mini{padding:2px 8px;font-size:11px;border-radius:2px;
