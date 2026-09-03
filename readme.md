@@ -652,7 +652,11 @@ include different sections, to accept a value differently, or simply because the
 first report was lost.
 
 Report home checks for a saved analysis whenever the study or the output folder
-changes and offers to load it. Loading takes a few seconds against a few minutes:
+changes, and **loads it without being asked**. The analysis is already done;
+making a reader click to see results that exist only invites them to run it
+again. Running again stays one button away, and is what they want only when the
+recording or the options have changed. Loading takes a few seconds against a few
+minutes:
 
 ```
 ANALYSE  ready in 185 s

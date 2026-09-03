@@ -56,6 +56,7 @@ var S = {
   // is running off one.
   saved: null,
   restored: false,
+  restoring: false,
   canGenerate: true,
   // Which event type the Events screen is filtered to, and how many rows it
   // draws. 05JC has 448 spike detections; without a filter they bury the
@@ -133,6 +134,13 @@ function checkSaved() {
   }
   return api('/api/analysis' + q).then(function (r) {
     S.saved = r.analysis || null;
+    // Load it without being asked. The analysis is already done; making the
+    // reader click to see results that exist only invites them to run it
+    // again. Running again stays available, and is what they want only when
+    // the recording or the options have changed.
+    if (S.saved && !S.session && !S.restoring && S.status === 'idle') {
+      return restoreSaved(false);
+    }
     render();
   }).catch(function () {
     S.saved = null;
@@ -140,9 +148,13 @@ function checkSaved() {
   });
 }
 
-function restoreSaved() {
+function restoreSaved(navigate) {
+  // 'POST' was missing, so the body landed in api()'s method slot and the
+  // browser refused the request: "'[object Object]' is not a valid HTTP
+  // method". Every other call site passes it.
   S.error = null;
-  api('/api/restore', { study: S.study, options: S.options })
+  S.restoring = true;
+  return api('/api/restore', 'POST', { study: S.study, options: S.options })
     .then(function (r) {
       S.session = r.id;
       S.restored = true;
@@ -151,8 +163,13 @@ function restoreSaved() {
       writeHash();
       return refresh();
     })
-    .then(function () { go('recording'); })
+    .then(function () {
+      S.restoring = false;
+      if (navigate) go('recording');
+      else render();
+    })
     .catch(function (e) {
+      S.restoring = false;
       S.error = String(e.message || e);
       render();
     });
@@ -355,17 +372,27 @@ function renderHome() {
 
   if (S.saved) {
     var when = S.saved.saved ? S.saved.saved.replace('T', ' ') : 'earlier';
-    html += '<div class="panel"><h3 class="sub">This study has been analysed before</h3>' +
-      '<p class="job">Analysed ' + esc(when) + '. Loading it takes seconds ' +
-      'and gives the same findings; analysing again takes minutes and is only ' +
-      'needed if the recording or the options have changed.</p>' +
+    var loaded = S.restored && S.session;
+    html += '<div class="panel"><h3 class="sub">' +
+      (loaded ? 'Showing the analysis of ' + esc(when)
+              : 'This study has been analysed before') + '</h3>' +
+      '<p class="job">' +
+      (loaded
+        ? 'Loaded from the study, so the recording was not analysed again. ' +
+          'Go to any section to review it. Run the analyses again only if the ' +
+          'recording or the options have changed.'
+        : 'Analysed ' + esc(when) + '. Loading it takes seconds and gives the ' +
+          'same findings; analysing again takes minutes.') +
+      '</p>' +
       (S.saved.can_generate ? '' :
         '<div class="note">The figures from that analysis are missing from the ' +
         'output folder (' + esc((S.saved.missing_figures || []).join(', ')) +
         '), so it can be reviewed but a document cannot be written from it. ' +
         'Run the analysis again to produce one.</div>') +
       '<div class="head-actions" style="margin-top:8px">' +
-      '<button class="btn" data-primary id="loadBtn">Load the saved analysis</button>' +
+      (loaded
+        ? '<button class="btn" id="reviewBtn2">Go to review</button>'
+        : '<button class="btn" data-primary id="loadBtn">Load the saved analysis</button>') +
       '</div></div>';
   }
 
@@ -429,7 +456,9 @@ function renderHome() {
   };
   document.getElementById('runBtn').onclick = startAnalysis;
   var load = document.getElementById('loadBtn');
-  if (load) load.onclick = restoreSaved;
+  if (load) load.onclick = function () { restoreSaved(true); };
+  var review2 = document.getElementById('reviewBtn2');
+  if (review2) review2.onclick = function () { go('recording'); };
   var review = document.getElementById('reviewBtn');
   if (review) review.onclick = function () { go('recording'); };
 }
@@ -1131,6 +1160,7 @@ function startAnalysis() {
   S.error = null;
   S.report = null;
   S.restored = false;
+  S.restoring = false;
   S.canGenerate = true;
   S.route = 'analysis';
   render();

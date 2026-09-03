@@ -120,7 +120,8 @@ th{text-align:left;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase
 td{padding:7px 8px;border-bottom:1px solid var(--p-border-subtle);vertical-align:top}
 tbody tr:hover{background:var(--p-accent-quiet)}
 td.value{font-weight:600}
-.basis{display:block;font-size:11px;color:var(--p-text-secondary);margin-top:2px;line-height:1.35}
+.basis{display:block;font-size:11px;color:var(--p-text-secondary);margin-top:2px;
+  line-height:1.35;text-transform:none;letter-spacing:0}
 .nowrap{white-space:nowrap}
 
 button.btn{padding:5px 12px;border-radius:2px;border:1px solid var(--p-border-strong);
