@@ -43,3 +43,7 @@ ProfusionEEGSDK/PythonSDK/cmpeeg/cmpeeg/cmpeeg/x64/
 # project needs - the event-type numbers and their display strings - so the .rc
 # itself is only required to regenerate it.
 /ProFusionEEG.rc
+
+# The ProfusionEEG SDK manual. Compumedics product documentation, kept out for
+# the same reason as the SDK itself and ProFusionEEG.rc.
+/ProFusionEEG4SDK.doc

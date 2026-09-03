@@ -29,7 +29,7 @@ var RAIL = [
 
 // What this page needs from the API. The server reports its own; a lower number
 // means the server is running code older than this file.
-var API_EXPECTED = 5;
+var API_EXPECTED = 6;
 
 var PROV_LABEL = {
   measured: 'Measured',
@@ -50,6 +50,7 @@ var S = {
   options: {},
   defaults: {},
   llm: null,
+  templates: [],
   stale: false,
   pid: null,
   // A previous analysis of this study found on disk, and whether this session
@@ -432,6 +433,20 @@ function renderHome() {
     '</select><span class="basis">The Word document is the one a reader can ' +
     'edit after generation. The PDF is a fixed record and is what this page ' +
     'can display without any application installed.</span></label>' +
+    (S.templates.length
+      ? '<label class="field" style="margin-top:8px">' +
+        '<span>Word template</span><select data-opt="docxTemplate">' +
+        '<option value="">None - the report\'s own layout</option>' +
+        S.templates.map(function (entry) {
+          return '<option value="' + esc(entry.path) + '"' +
+            (o.docxTemplate === entry.path ? ' selected' : '') + '>' +
+            esc(entry.name) + (entry.error ? ' (unreadable)' : '') +
+            '</option>';
+        }).join('') +
+        '</select><span class="basis">A department\'s own letterhead, styles ' +
+        'and sections. Put templates in the templates folder; see Settings.' +
+        '</span></label>'
+      : '') +
     '<label class="field" style="margin-top:8px"><span>Sleep backend</span>' +
     '<select data-opt="sleepBackend">' +
     ['usleep', 'yasa'].map(function (b) {
@@ -1091,6 +1106,35 @@ function renderSettings() {
   }
   html += '</div>';
 
+  html += '<div class="panel"><h3 class="sub">Word templates</h3>';
+  if (!S.templates.length) {
+    html += '<p class="job">No templates found. Put a .docx in the ' +
+      'templates folder beside the application and it will be offered on ' +
+      'Report home.</p>';
+  } else {
+    html += '<table><thead><tr><th scope="col">Template</th>' +
+      '<th scope="col">Places</th></tr></thead><tbody>';
+    S.templates.forEach(function (entry) {
+      html += '<tr><td class="value">' + esc(entry.name) + '</td><td>' +
+        (entry.error
+          ? '<span class="basis" style="margin:0">' + esc(entry.error) + '</span>'
+          : (entry.places.length
+              ? esc(entry.places.join(', '))
+              : '<span class="basis" style="margin:0">nothing - the report is ' +
+                'appended after the template\'s own content</span>')) +
+        '</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '<p class="job">A template carries its own header, footer and ' +
+    'styles - a logo in the Word header needs nothing else. Put a ' +
+    '[@SCORE,&lt;name&gt;] token, alone in its paragraph, where each part of ' +
+    'the report should sit; the syntax is ProfusionEEG\'s own, and its ' +
+    '[@1000] and [@99,...] tokens are left untouched for its pass to fill. ' +
+    'A section the template does not position is appended rather than ' +
+    'dropped - to leave one out of a report, exclude it on the review ' +
+    'screens.</p></div>';
+
   html += '<div class="panel"><h3 class="sub">Where outputs go</h3>' +
     '<table><tbody>' +
     '<tr><td class="value nowrap">ProfusionEEG study</td><td>' +
@@ -1333,6 +1377,7 @@ api('/api/config').then(function (c) {
   S.stale = (c.api || 0) < API_EXPECTED;
   S.pid = c.pid || null;
   S.llm = c.llm || null;
+  S.templates = c.templates || [];
   if (S.llm && !(S.llm.available || []).length) S.options.aiReport = false;
   if (c.study) S.study = c.study;
 

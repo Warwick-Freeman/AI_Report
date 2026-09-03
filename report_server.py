@@ -43,10 +43,12 @@ import report_api
 # it started with. A new front end then talks to an old API and misreads what it
 # gets back - a missing field looks like an empty one. The page compares this
 # against what it expects and says to restart rather than guessing.
-API_VERSION = 5
+API_VERSION = 6
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
+# Word templates a department has put here are offered in Settings.
+TEMPLATES = os.path.join(HERE, 'templates')
 
 # Sessions live for the life of the process. Reports are small; the analysis
 # behind them is not, which is why they are kept.
@@ -103,6 +105,31 @@ def ensureOutputFolder(path, study=None):
     except OSError as e:
         return absolute, ('Cannot create the output folder %s: %s' % (absolute, e))
     return absolute, None
+
+
+def listTemplates():
+    """The Word templates available, newest first.
+
+    Reported with the section tokens each one places, so a reader choosing a
+    template can see what it will lay out before generating a report with it.
+    """
+    if not os.path.isdir(TEMPLATES):
+        return []
+    out = []
+    for name in sorted(os.listdir(TEMPLATES)):
+        if not name.lower().endswith('.docx') or name.startswith('~$'):
+            continue
+        path = os.path.join(TEMPLATES, name)
+        entry = {'name': name, 'path': path, 'places': [], 'error': None}
+        try:
+            import createDOCX
+            from docx import Document
+            tokens, _ = createDOCX._tokenParagraphs(Document(path))
+            entry['places'] = [sectionId for _, sectionId in tokens]
+        except Exception as e:
+            entry['error'] = '%s: %s' % (type(e).__name__, e)
+        out.append(entry)
+    return out
 
 
 def resolveLlm(options):
@@ -483,6 +510,7 @@ class Handler(BaseHTTPRequestHandler):
                 'study': self.server.startStudy,
                 # Provider names and the model each would use. No keys: the
                 # front end never needs one and must never be sent one.
+                'templates': listTemplates(),
                 'llm': {
                     'available': [{'provider': name, 'model': model}
                                   for name, _envVar, model in available],

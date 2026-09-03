@@ -738,6 +738,62 @@ cleanly, and `docxTemplate` opens a department's own template so its styles,
 header and footer carry into the report. The figures are embedded from the same
 files the PDF uses, each scaled to fit the page under its own caption.
 
+#### Customising the Word report
+
+A department supplies its own `.docx` template. Put it in `templates/` and it is
+offered on Report home; `make_sample_template.py` writes a starting point with a
+logo position, ProfusionEEG's patient tokens and every section token in place.
+
+A template carries its own **header, footer and styles**, so a logo in the Word
+header needs nothing more than that. To control *where* the report's parts sit,
+put a token alone in its own paragraph:
+
+```
+Clinical question and referral
+   <the department's own text>
+[@SCORE,recording]
+[@SCORE,pdr]
+Departmental protocol notes
+   <more of their own text>
+[@SCORE,interictal]
+```
+
+The syntax is ProfusionEEG's own - `[@SCORE,pdr]` has the same shape as the
+`[@99,ServiceDetails,GetTableValue,...]` calls its report templates already
+carry - so a template is one artefact with one convention. **Two passes, each
+owning its own tokens:** ProfusionEEG fills `[@1000]`, `[@1004]`, `[@99,...]`;
+this fills `[@SCORE,...]` and leaves everything else byte for byte as it was, so
+either pass can run first.
+
+Section names: `recording`, `pdr`, `interictal`, `episodes`, `events`, `sleep`,
+`artifacts`, `conclusion`, `narrative`, `measurements`, `figures`, and
+`[@SCORE,all]` for the whole report at one point.
+
+Four rules, each there for a reason:
+
+- **A token must be alone in its paragraph.** A section is a block, so a
+  placeholder for one is a block. Matching tokens anywhere in a paragraph made
+  the sample template's own sentence about `[@SCORE,all]` render the entire
+  report a second time; a department documenting its template would hit the
+  same thing. A token found among other text is reported and ignored.
+- **A section the template does not position is appended**, under *Further
+  Findings*, not dropped. A template that has not caught up with a new section
+  must not quietly leave it out of a clinical report. To leave a section out of
+  a particular report, exclude it on the review screens - placement is the
+  template's decision, inclusion is the reader's, per study.
+- **An unrecognised token is named**, with the list of valid names, rather than
+  silently doing nothing.
+- **The template is recorded in the report.** A department edits its template
+  over time, and which letterhead and boilerplate a report was signed under is
+  the question asked afterwards.
+
+Templates must be `.docx`. ProfusionEEG's shipped templates are Word 97 `.doc`,
+which `python-docx` cannot read - re-save one as `.docx` in Word and its tokens
+carry across unchanged.
+
+Styles the report uses, so restyling them restyles the report: `Heading 1`,
+`Heading 2`, `Normal`, `Table Grid`, `List Bullet`.
+
 `reportFormat` takes `docx`, `pdf` or `both`, and is a selector on Report home.
 `both` is the default: the .docx is what a reader edits, and the PDF is the fixed
 record and the one this page can display without any application installed. With

@@ -16,6 +16,7 @@
 # PDF uses.
 ############################################
 import os
+import re
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -38,48 +39,96 @@ PAGE_WIDTH_IN = 7.1
 # figure differently - which they did until the Word captions were corrected.
 
 
+# Section tokens a template can place, in the order they are used when a
+# template places none of them.
+#
+# The syntax is ProfusionEEG's own: [@SCORE,pdr] has the same shape as the
+# [@99,ServiceDetails,GetTableValue,...] calls its report templates already
+# carry, so a template is one artefact with one convention and anyone who has
+# written a Profusion template already knows how to read it.
+SECTION_ORDER = ('recording', 'pdr', 'interictal', 'episodes', 'events',
+                 'sleep', 'artifacts', 'conclusion', 'narrative',
+                 'measurements', 'figures')
+
+# [@SCORE,pdr] / [@score , figures] / [@SCORE,all]
+TOKEN_PATTERN = re.compile(r'\[@\s*SCORE\s*,\s*([A-Za-z_]+)\s*\]', re.I)
+
+
 def writeDOCX(fileName, results, dest_folder, ai_report_text=None,
               template=None):
     """Write the report as a .docx. Returns the path written.
 
-    A template is opened and appended to when given, so a department's own
-    styles, header and footer carry into the report.
+    Without a template the sections are written in their default order.
+
+    With one, the template's own styles, header and footer carry - a logo in the
+    Word header needs nothing more than that - and any [@SCORE,<section>] token
+    in the body is replaced in place by that section, so a department decides
+    where the report's parts sit among its own text. Tokens it does not use are
+    appended at the end rather than dropped: leaving a template out of date must
+    not silently remove a clinical section from a report.
+
+    ProfusionEEG's own tokens - [@1000], [@99,...] - are left exactly as they
+    are, for its pass to fill.
     """
     document = Document(template) if template else Document()
     if not template:
         _setUpStyles(document)
 
     excluded = set(results.get('_excluded') or ())
-
-    def wanted(sectionId):
-        return sectionId not in excluded
-
     stem = os.path.splitext(os.path.basename(fileName))[0]
-    document.add_heading('EEG Report - %s' % fileName, level=0)
-    _scoreNote(document)
 
-    if wanted('recording'):
-        _recording(document, results.get('recording'))
-    if wanted('pdr'):
-        _pdr(document, results.get('pdr'))
-    if wanted('interictal'):
-        _interictal(document, results.get('interictal'))
-    if wanted('episodes'):
-        _episodes(document, (results.get('spikeseizure') or {}).get('episodes'),
-                  (results.get('spikeseizure') or {}).get('notes'))
-    if wanted('events'):
-        _studyEvents(document, results.get('selected_events'))
-    if wanted('sleep'):
-        _sleep(document, results.get('sleep'))
-    if wanted('artifacts'):
-        _artifacts(document, results.get('artifacts'))
-    if wanted('conclusion'):
-        _conclusion(document, results.get('conclusion'))
-    if ai_report_text:
-        _narrative(document, ai_report_text)
+    # Each section as something that can be rendered wherever it is wanted.
+    renderers = {
+        'recording': lambda d: _recording(d, results.get('recording')),
+        'pdr': lambda d: _pdr(d, results.get('pdr')),
+        'interictal': lambda d: _interictal(d, results.get('interictal')),
+        'episodes': lambda d: _episodes(
+            d, (results.get('spikeseizure') or {}).get('episodes'),
+            (results.get('spikeseizure') or {}).get('notes')),
+        'events': lambda d: _studyEvents(d, results.get('selected_events')),
+        'sleep': lambda d: _sleep(d, results.get('sleep')),
+        'artifacts': lambda d: _artifacts(d, results.get('artifacts')),
+        'conclusion': lambda d: _conclusion(d, results.get('conclusion')),
+        'narrative': lambda d: (_narrative(d, ai_report_text)
+                                if ai_report_text else None),
+        'measurements': lambda d: _measurements(d, results),
+        'figures': lambda d: _figures(d, dest_folder, fileName),
+    }
+    # A section the reader excluded on the review screens is not rendered at
+    # all, wherever a template puts it. Placement is the template's decision;
+    # inclusion is the reader's, per study.
+    for sectionId in list(renderers):
+        if sectionId in excluded:
+            renderers[sectionId] = lambda d: None
 
-    _measurements(document, results)
-    _figures(document, dest_folder, fileName)
+    placed, unknown = _placeTokens(document, renderers)
+
+    if not placed:
+        # No template, or a template that places nothing: the report in full,
+        # in its own order, after whatever the template already held.
+        document.add_heading('EEG Report - %s' % fileName, level=0)
+        _scoreNote(document)
+        for sectionId in SECTION_ORDER:
+            renderers[sectionId](document)
+    else:
+        missing = [s for s in SECTION_ORDER if s not in placed]
+        if missing:
+            # Appended, not dropped. A template that has not caught up with a
+            # new section would otherwise quietly leave it out of the report.
+            print('Template placed %d section(s); appending %s, which it does '
+                  'not position.' % (len(placed), ', '.join(missing)))
+            document.add_heading('Further Findings', level=1)
+            _basis(document, 'Sections the report template does not position. '
+                             'Add a [@SCORE,<name>] token where each belongs.',
+                   Inches(0))
+            for sectionId in missing:
+                renderers[sectionId](document)
+        if unknown:
+            print('Template has unrecognised section token(s): %s. Known names: '
+                  '%s.' % (', '.join(sorted(unknown)), ', '.join(SECTION_ORDER)))
+
+    if template:
+        _templateNote(document, template)
 
     outFile = os.path.join(dest_folder, stem + '.docx')
     try:
@@ -94,6 +143,116 @@ def writeDOCX(fileName, results, dest_folder, ai_report_text=None,
     outFile = os.path.abspath(outFile)
     print('Successfully generate docx file: ', outFile)
     return outFile
+
+
+# --------------------------------------------------------------- placement
+
+def _tokenParagraphs(document):
+    """Body paragraphs that are a [@SCORE,...] token and nothing else.
+
+    A token has to be alone in its paragraph. A section is a block, so a
+    placeholder for one is a block too - and prose that merely mentions a token
+    is not a placeholder. The sample template's own instructions say what
+    [@SCORE,all] does, and matching tokens anywhere in a paragraph made that
+    sentence render the whole report a second time. A department documenting
+    its own template would hit exactly the same thing.
+
+    Headers and footers are deliberately not searched: what belongs there is a
+    logo and the patient tokens ProfusionEEG fills, not a findings table.
+
+    Returns (placeholders, mentioned) - the second being paragraphs that
+    contain a token among other text, so they can be reported rather than
+    silently ignored.
+    """
+    placeholders, mentioned = [], []
+    for paragraph in document.paragraphs:
+        text = (paragraph.text or '').strip()
+        if not text:
+            continue
+        match = TOKEN_PATTERN.fullmatch(text)
+        if match:
+            placeholders.append((paragraph, match.group(1).lower()))
+        elif TOKEN_PATTERN.search(text):
+            mentioned.append(text)
+    return placeholders, mentioned
+
+
+def _renderBefore(document, anchor, render):
+    """Render a section and move what it produced to just before anchor.
+
+    python-docx can only append, so the section is built at the end of the body
+    and then moved. Identity is tracked rather than position because a renderer
+    may add a section break as well as paragraphs and tables.
+    """
+    body = document.element.body
+    # The list is held, not a set of id()s. lxml builds element proxies on
+    # demand and only guarantees the same proxy while a reference is alive, so
+    # an id() taken from a throwaway proxy can be reused by a different node -
+    # which made this treat paragraphs already in the template as newly added
+    # and move them, scrambling the document.
+    before = list(body)
+    render(document)
+    added = [e for e in body if not any(e is kept for kept in before)]
+    for element in added:
+        anchor.addprevious(element)
+
+
+def _removeToken(paragraph):
+    """Drop the placeholder paragraph now its section has been rendered."""
+    element = paragraph._p
+    element.getparent().remove(element)
+
+
+def _placeTokens(document, renderers):
+    """Fill every [@SCORE,...] token in the template. Returns (placed, unknown).
+
+    Only these tokens are touched. ProfusionEEG's own - [@1000], [@99,...] -
+    are left byte for byte as they are, so its pass can fill them whether it
+    runs before or after this one.
+    """
+    tokens, mentioned = _tokenParagraphs(document)
+    for text in mentioned:
+        # Told about, not acted on: a token sharing a paragraph with other text
+        # is far more likely to be someone writing about it than placing it.
+        print('Ignored a section token inside other text (a token must be alone '
+              'in its paragraph): %r' % text[:70])
+    if not tokens:
+        return set(), set()
+
+    placed, unknown = set(), set()
+    for paragraph, sectionId in tokens:
+        if sectionId == 'all':
+            for name in SECTION_ORDER:
+                if name in placed:
+                    continue
+                _renderBefore(document, paragraph._p, renderers[name])
+                placed.add(name)
+            _removeToken(paragraph)
+            continue
+        if sectionId not in renderers:
+            unknown.add(sectionId)
+            continue
+        if sectionId in placed:
+            # A template naming the same section twice would otherwise report
+            # the same findings twice.
+            print('Section token [@SCORE,%s] appears more than once; the later '
+                  'one was ignored.' % sectionId)
+            _removeToken(paragraph)
+            continue
+        _renderBefore(document, paragraph._p, renderers[sectionId])
+        placed.add(sectionId)
+        _removeToken(paragraph)
+    return placed, unknown
+
+
+def _templateNote(document, template):
+    """Which template produced this report.
+
+    A department edits its template over time, and 'which letterhead and
+    boilerplate was this signed under' is the question asked afterwards.
+    """
+    _basis(document,
+           'Report template: %s' % os.path.basename(template), Inches(0))
 
 
 # ------------------------------------------------------------------ scaffolding
