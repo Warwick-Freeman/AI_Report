@@ -18,8 +18,9 @@
 import os
 
 from docx import Document
-from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 from createPDF import figureNames
@@ -28,6 +29,10 @@ from recording import _hms
 # Grey, for the basis lines that sit under a value. The same distinction the
 # PDF makes between a finding and the measurement behind it.
 BASIS_GREY = RGBColor(0x69, 0x69, 0x69)
+
+# The usable width of a portrait page at these margins. Every column set below
+# adds up to this or less; Word will otherwise widen the table past the margin.
+PAGE_WIDTH_IN = 7.1
 
 # What each figure is, in the order the analysis draws them.
 FIGURE_CAPTIONS = (
@@ -84,7 +89,15 @@ def writeDOCX(fileName, results, dest_folder, ai_report_text=None,
     _figures(document, dest_folder, fileName)
 
     outFile = os.path.join(dest_folder, stem + '.docx')
-    document.save(outFile)
+    try:
+        document.save(outFile)
+    except PermissionError as e:
+        # Word holds an exclusive lock on an open document, and regenerating a
+        # report you are reading is an obvious thing to do. Say which file and
+        # why rather than surfacing a bare errno.
+        raise PermissionError(
+            'Cannot write %s - it is open in another application, most likely '
+            'Word. Close it and generate again.' % os.path.abspath(outFile)) from e
     outFile = os.path.abspath(outFile)
     print('Successfully generate docx file: ', outFile)
     return outFile
@@ -125,9 +138,25 @@ def _basis(document, text, indent=Inches(0.25)):
     run.font.color.rgb = BASIS_GREY
 
 
+def _repeatHeader(row):
+    """Mark a row as a header so Word repeats it on every page.
+
+    A table that runs over a page break otherwise continues with unlabelled
+    columns, which for a findings table means a reader cannot tell prevalence
+    from confidence.
+    """
+    properties = row._tr.get_or_add_trPr()
+    header = OxmlElement('w:tblHeader')
+    header.set(qn('w:val'), 'true')
+    properties.append(header)
+
+
 def _table(document, headers, widths=None):
     table = document.add_table(rows=1, cols=len(headers))
     table.style = 'Table Grid'
+    # Word recalculates column widths when autofit is left on, so the widths set
+    # per cell below were being discarded and the columns came out squashed.
+    table.autofit = False
     header = table.rows[0].cells
     for index, text in enumerate(headers):
         header[index].text = ''
@@ -136,6 +165,7 @@ def _table(document, headers, widths=None):
         run.font.size = Pt(8)
         if widths:
             header[index].width = Inches(widths[index])
+    _repeatHeader(table.rows[0])
     return table
 
 
@@ -471,23 +501,65 @@ def _measurements(document, results):
                % number(float(ratio) * 100, '%'), Inches(0))
 
 
+def _usableBox(section):
+    """The space a figure has on the page, in inches."""
+    width = (section.page_width.inches
+             - section.left_margin.inches - section.right_margin.inches)
+    height = (section.page_height.inches
+              - section.top_margin.inches - section.bottom_margin.inches)
+    return width, height
+
+
+def _figureWidth(path, maxWidth, maxHeight):
+    """How wide to place a figure so it fits the page in both directions.
+
+    Fitting width alone is what made the figures section unusable: the
+    topographic maps are 1440x1800 and 1440x2160, so at 9.5 inches wide they
+    wanted 11.9 and 14.2 inches of height on a page with 6.5 - Word moved each
+    one to the page after its heading and left the heading stranded.
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            pixelWidth, pixelHeight = image.size
+        aspect = float(pixelWidth) / float(pixelHeight or 1)
+    except Exception:
+        return maxWidth
+    if aspect <= 0:
+        return maxWidth
+    # Whichever bound binds first.
+    return min(maxWidth, maxHeight * aspect)
+
+
 def _figures(document, dest_folder, fileName):
-    """The analysis figures, each on a landscape page so they are legible."""
+    """The analysis figures, each below its own caption.
+
+    The page stays portrait. Four of the six figures are portrait or square -
+    the topographic maps and the spectrogram - so a landscape section made them
+    smaller, not larger, as well as breaking the document into two orientations
+    for anyone editing it.
+    """
     names = figureNames(fileName)
     present = [(name, os.path.join(dest_folder, name)) for name in names]
     present = [(n, p) for n, p in present if os.path.isfile(p)]
     if not present:
         return
 
-    section = document.add_section()
-    section.orientation = WD_ORIENT.LANDSCAPE
-    section.page_width, section.page_height = section.page_height, section.page_width
-    section.left_margin = section.right_margin = Inches(0.5)
-
+    document.add_page_break()
     document.add_heading('Figures', level=1)
+
+    maxWidth, maxHeight = _usableBox(document.sections[-1])
+    # Room for the caption above the figure.
+    maxHeight -= 0.6
+
     for index, (name, path) in enumerate(present):
         caption = FIGURE_CAPTIONS[index] if index < len(FIGURE_CAPTIONS) else name
-        document.add_heading(caption, level=2)
+        heading = document.add_heading(caption, level=2)
+        # Word must not put the caption on one page and the figure on the next.
+        heading.paragraph_format.keep_with_next = True
+
         paragraph = document.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        paragraph.add_run().add_picture(path, width=Inches(9.5))
+        paragraph.paragraph_format.keep_together = True
+        paragraph.add_run().add_picture(
+            path, width=Inches(_figureWidth(path, maxWidth, maxHeight)))

@@ -722,7 +722,7 @@ Both come from the same results, so they cannot drift apart in substance. The
 .docx uses real Word styles - Heading 1, Heading 2, Table Grid - so it restyles
 cleanly, and `docxTemplate` opens a department's own template so its styles,
 header and footer carry into the report. The figures are embedded from the same
-files the PDF uses, on a landscape section.
+files the PDF uses, each scaled to fit the page under its own caption.
 
 `reportFormat` takes `docx`, `pdf` or `both`, and is a selector on Report home.
 `both` is the default: the .docx is what a reader edits, and the PDF is the fixed
