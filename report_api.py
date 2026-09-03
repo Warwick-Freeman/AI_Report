@@ -16,8 +16,9 @@
 #
 #   measured  a deterministic measurement of the signal. Reproducible: the same
 #             recording gives the same number.
-#   model     the output of a trained model, unverified. Reproducible, but the
-#             model can be wrong in ways the number does not show.
+#   model     produced by a trained model - shown as 'AI analysis'. Nothing has
+#             verified it: reproducible, but a model can be wrong in ways the
+#             number does not show.
 #   human     entered or overridden by the electroencephalographer. SCORE
 #             reserves diagnostic significance and the conclusion for a human,
 #             and nothing here writes them.
@@ -588,7 +589,7 @@ def buildReport(results, studyPath, options=None):
         'sections': ordered,
         'provenance_key': {
             MEASURED: 'Measured from the signal',
-            MODEL: 'Model output - unverified',
+            MODEL: 'AI analysis - not verified',
             HUMAN: 'Human-scored',
             NONE: 'Not scored',
         },

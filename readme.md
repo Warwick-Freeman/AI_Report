@@ -572,7 +572,7 @@ analysis actually did rather than guessed from the wording of a basis string.
 | Mark | Meaning |
 | --- | --- |
 | **Measured** | A deterministic measurement of the signal. The same recording gives the same number. |
-| **Model - unverified** | The output of a trained model. Reproducible, but wrong in ways the number does not show. |
+| **AI analysis** | Produced by a trained model, and not verified. Reproducible, but wrong in ways the number does not show. |
 | **Human-scored** | Entered or overridden by the electroencephalographer. |
 | **Not scored** | Not scored, or not possible to determine. SCORE separates this from a negative finding, and so does this. |
 

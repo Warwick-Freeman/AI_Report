@@ -33,7 +33,7 @@ var API_EXPECTED = 3;
 
 var PROV_LABEL = {
   measured: 'Measured',
-  model: 'Model \u2014 unverified',
+  model: 'AI analysis',
   human: 'Human-scored',
   none: 'Not scored'
 };
@@ -1004,7 +1004,9 @@ function renderSettings() {
     Object.keys(PROV_LABEL).map(function (k) {
       var why = {
         measured: 'A deterministic measurement of the signal. The same recording gives the same number.',
-        model: 'The output of a trained model, unverified. It can be wrong in ways the number does not show.',
+        model: 'Produced by a trained model. Nothing has verified it - a model ' +
+          'can be wrong in ways the number does not show - so it needs the ' +
+          'same reading as any other unconfirmed value.',
         human: 'Entered or overridden by the electroencephalographer.',
         none: 'Not scored, or not possible to determine. SCORE distinguishes this from a negative finding.'
       }[k];
