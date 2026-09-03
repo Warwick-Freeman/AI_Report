@@ -716,8 +716,23 @@ inventories name the type before numbering it.
 End events are dropped from the list, as they are everywhere else - a timed event
 is stored as a start carrying the duration plus an end at start+duration, and
 keeping both listed every event twice and made the detector-event count on this
-screen twice what the Episodes page showed for the same seizures. Where the list
-is longer than the screen shows, it says so rather than looking complete.
+screen twice what the Episodes page showed for the same seizures.
+
+The list is **filtered by type**, and capped per type as well as overall. A flat
+cap took the first 500 events of `05JC.eeg` and 433 of them were spike bursts,
+which squeezed the technologist's annotations down to a handful and cut 33 events
+entirely - on a screen whose whole purpose is picking individual events out of
+the record. Taking a share of each type keeps every kind of event findable:
+
+```
+Spike burst              200 shown of 448
+Annotation                23 shown of  23
+Photic Frequency change    9 shown of   9
+Seizure                    4 shown of   4
+Hyperventilation           1 shown of   1
+```
+
+Whatever is not shown is stated rather than silently dropped.
 
 #### What it does not do yet
 

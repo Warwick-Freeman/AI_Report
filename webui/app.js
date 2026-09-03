@@ -57,6 +57,11 @@ var S = {
   saved: null,
   restored: false,
   canGenerate: true,
+  // Which event type the Events screen is filtered to, and how many rows it
+  // draws. 05JC has 448 spike detections; without a filter they bury the
+  // fourteen annotations a reader actually wants to pick out.
+  eventFilter: null,
+  eventRows: 200,
   pdf: null,
   data: null,
   error: null,
@@ -456,9 +461,11 @@ function renderAnalysis() {
       ['Posterior dominant rhythm', 'pdr', 'model',
        'frequency from the CNN/GoogleNet/ResNet ensemble, the rest measured'],
       ['Interictal findings', 'interictal', 'measured',
-       'band power per electrode, against the contralateral side'],
+       'band power per electrode against the contralateral side, plus any ' +
+       'spike detections from the detector'],
       ['Spike and seizure detections', 'episodes', 'model',
-       'eetEEGSpike and eetEEGSeizure events, from the cleared detector'],
+       'spike (74, 23, 24) and seizure (75) event types - the type says a spike ' +
+       'was detected, not which detector found it'],
       ['Sleep staging', 'sleep', 'model', 'U-Sleep or YASA, unverified'],
       ['Artifacts', 'artifacts', 'measured', 'eleven deterministic detectors'],
       ['Study events', 'events', 'human',
@@ -472,7 +479,19 @@ function renderAnalysis() {
       var state = sec ? sec.state : (S.status === 'running' ? 'running' : 'not-analysed');
       var count = 0;
       var result;
-      if (r[0] === 'Activation procedures') {
+      if (r[0] === 'Spike and seizure detections') {
+        // The seizures are on Episodes and the spikes are a finding on
+        // Interictal, so counting one section understated what the detector
+        // supplied.
+        var seizures = ((section('episodes') || {}).findings || []).length;
+        var spikeFindings = ((section('interictal') || {}).findings || [])
+          .filter(function (f) { return f.provenance === 'model'; }).length;
+        result = (seizures || spikeFindings)
+          ? [seizures ? seizures + ' seizure(s)' : null,
+             spikeFindings ? spikeFindings + ' spike finding(s)' : null]
+              .filter(Boolean).join(', ')
+          : (sec && sec.state === 'not-analysed' ? 'Not analysed' : 'No findings');
+      } else if (r[0] === 'Activation procedures') {
         var act = (section('recording') || {}).activation;
         var performed = ((act || {}).procedures || []).filter(function (p) {
           return p.provenance === 'measured';
@@ -620,15 +639,14 @@ function findingsTable(sec) {
 function eventsTable(sec) {
   if (!sec.events || !sec.events.length) return '';
 
+  var types = sec.event_types || [];
+  var total = sec.event_total || sec.events.length;
   var detections = sec.events.filter(function (e) { return e.is_detection; }).length;
   var provocations = sec.events.filter(function (e) { return e.provocation; }).length;
 
-  var shown = Math.min(sec.events.length, 200);
-  var total = sec.event_total || sec.events.length;
-
   var summary = 'Named as ProfusionEEG names them. ';
   summary += detections
-    ? detections + ' of these are detector output. '
+    ? detections + ' of those listed are detector output. '
     : 'None is a detector detection. ';
   if (provocations) {
     summary += provocations + ' record a provocation SCORE asks to be reported. ';
@@ -637,23 +655,58 @@ function eventsTable(sec) {
     'ticked here is written to the report as a Study Events page, as context ' +
     'for the findings rather than as findings.';
 
-  // Say when the list is cut. A truncated table that looks complete would let
-  // a reader believe they had seen every event in the recording.
-  var cut = '';
-  if (shown < total) {
-    cut = '<div class="note">Showing the first ' + shown + ' of ' + total +
-      ' events. The rest are in the study and can be reviewed in ' +
-      'ProfusionEEG; they are not listed here.</div>';
+  var html = '<p class="job">' + esc(summary) + '</p>';
+
+  // Filter by type. A recording where one detector fired hundreds of times is
+  // exactly where picking a single annotation matters most.
+  if (types.length > 1) {
+    html += '<h3 class="sub">Show</h3><div class="head-actions">' +
+      '<button class="mini" data-event-filter="" aria-pressed="' +
+      (S.eventFilter ? 'false' : 'true') + '">All (' + total + ')</button>';
+    types.forEach(function (entry) {
+      var label = entry.type + ' (' + entry.total + ')';
+      html += '<button class="mini" data-event-filter="' + esc(entry.type) +
+        '" aria-pressed="' + (S.eventFilter === entry.type ? 'true' : 'false') +
+        '">' + esc(label) + '</button>';
+    });
+    html += '</div>';
   }
 
-  var html = '<p class="job">' + esc(summary) + '</p>' + cut +
-    '<table><thead><tr>' +
+  var visible = S.eventFilter
+    ? sec.events.filter(function (e) { return e.type === S.eventFilter; })
+    : sec.events;
+  var rows = visible.slice(0, S.eventRows);
+
+  // Say what is not on screen: how many this type holds, how many were carried
+  // from the study, and how many rows are drawn.
+  var carried = sec.events.length;
+  var notes = [];
+  if (S.eventFilter) {
+    var entry = types.filter(function (x) { return x.type === S.eventFilter; })[0];
+    if (entry && entry.shown < entry.total) {
+      notes.push(entry.shown + ' of ' + entry.total + ' ' + S.eventFilter +
+        ' events were carried from the study.');
+    }
+  } else if (carried < total) {
+    notes.push(carried + ' of ' + total + ' events were carried from the study, ' +
+      'taking a share of each type so none is squeezed out.');
+  }
+  if (rows.length < visible.length) {
+    notes.push('Showing ' + rows.length + ' of ' + visible.length +
+      ' listed. Filter by type to see the rest.');
+  }
+  if (notes.length) {
+    html += '<div class="note">' + esc(notes.join(' ')) +
+      ' The full record is in the study and can be reviewed in ProfusionEEG.</div>';
+  }
+
+  html += '<table><thead><tr>' +
     '<th scope="col" style="width:24px"><span class="sr-only">Include</span></th>' +
     '<th scope="col">Type</th><th scope="col">Time</th>' +
     '<th scope="col">Duration</th><th scope="col">Text</th>' +
     '<th scope="col">Channels</th><th scope="col" class="nowrap">Provenance</th>' +
     '</tr></thead><tbody>';
-  sec.events.slice(0, 200).forEach(function (e) {
+  rows.forEach(function (e) {
     html += '<tr><td><input type="checkbox" data-event="' + esc(e.id) +
       '" data-section="events"' + (e.included ? ' checked' : '') +
       ' style="width:auto"></td>' +
@@ -1013,6 +1066,14 @@ function wireSection(sec) {
       sendOverride(box.getAttribute('data-section'), edits);
     };
   });
+
+  Array.prototype.forEach.call(main.querySelectorAll('[data-event-filter]'),
+    function (b) {
+      b.onclick = function () {
+        S.eventFilter = b.getAttribute('data-event-filter') || null;
+        render();
+      };
+    });
 
   Array.prototype.forEach.call(main.querySelectorAll('[data-event]'), function (box) {
     box.onchange = function () {

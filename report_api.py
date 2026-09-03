@@ -406,10 +406,17 @@ def conclusionSection(conclusion):
     return rows, draft
 
 
-# How many events are carried to the front end. A long-term recording can hold
-# tens of thousands; the reader is told when the list is cut rather than being
-# shown a truncated one that looks complete.
-EVENT_LIMIT = 500
+# How many events are carried to the front end.
+#
+# Capped per type as well as overall. A flat cap took the first 500 events of
+# 05JC.eeg and 433 of them were spike bursts, which squeezed the technologist's
+# annotations and the recording events down to a handful and cut 33 events
+# entirely - on a screen whose whole purpose is picking individual events out of
+# the record. A long-term study can hold tens of thousands, so some cap is
+# needed; taking a share of each type means every kind of event is still there
+# to be found.
+EVENT_LIMIT = 2000
+EVENTS_PER_TYPE = 200
 
 
 def eventsSection(studyPath):
@@ -435,7 +442,24 @@ def eventsSection(studyPath):
     # showed for the same four seizures.
     raw = [e for e in raw if not e.get('is_end_event')]
 
-    for e in raw[:EVENT_LIMIT]:
+    # Every type's own total, so the screen can say what it holds and what it
+    # is showing, and offer a filter that means something.
+    totals = {}
+    for e in raw:
+        label = e.get('type_label') or 'Unrecognised type'
+        totals[label] = totals.get(label, 0) + 1
+
+    kept, perType = [], {}
+    for e in raw:
+        label = e.get('type_label') or 'Unrecognised type'
+        if perType.get(label, 0) >= EVENTS_PER_TYPE:
+            continue
+        if len(kept) >= EVENT_LIMIT:
+            break
+        perType[label] = perType.get(label, 0) + 1
+        kept.append(e)
+
+    for e in kept:
         start = e.get('start_ns')
         # A detection is a model's output; an annotation is a person's; a
         # setting change or a viewing record is neither, and is measured fact
@@ -463,7 +487,10 @@ def eventsSection(studyPath):
             'provocation': e.get('provocation'),
             'included': False,
         })
-    return events, len(raw)
+    return events, {'total': len(raw),
+                    'by_type': [{'type': k, 'total': v, 'shown': perType.get(k, 0)}
+                                for k, v in sorted(totals.items(),
+                                                   key=lambda kv: -kv[1])]}
 
 
 # ------------------------------------------------------------------- assembly
@@ -511,9 +538,11 @@ def buildReport(results, studyPath, options=None):
                      'notes': artifactNotes,
                      'significance_options': list(ARTIFACT_SIGNIFICANCE)})
 
-    studyEvents, eventTotal = eventsSection(studyPath)
+    studyEvents, eventCounts = eventsSection(studyPath)
     sections.append({'id': 'events', 'rows': [], 'findings': [],
-                     'events': studyEvents, 'event_total': eventTotal,
+                     'events': studyEvents,
+                     'event_total': eventCounts['total'],
+                     'event_types': eventCounts['by_type'],
                      'notes': []})
 
     import score_common as sc
