@@ -43,7 +43,7 @@ import report_api
 # it started with. A new front end then talks to an old API and misreads what it
 # gets back - a missing field looks like an empty one. The page compares this
 # against what it expects and says to restart rather than guessing.
-API_VERSION = 3
+API_VERSION = 4
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
@@ -500,6 +500,33 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 return self._send(404, {'error': 'no such session'})
             tail = parts[4] if len(parts) > 4 else ''
+
+            if tail == 'document':
+                # Streamed to the browser rather than handed to the shell.
+                # os.startfile opens the reader on the machine running the
+                # server, and a background console process cannot take
+                # foreground focus on Windows - so the window appeared behind
+                # the browser and the button looked dead. Serving it means the
+                # browser opens it, in a tab the reader is already looking at.
+                target = session.get('pdf')
+                if not target or not os.path.isfile(target):
+                    return self._send(404, {'error': 'no document has been '
+                                                     'written in this session'})
+                with open(target, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/pdf')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Content-Disposition',
+                                 'inline; filename="%s"'
+                                 % os.path.basename(target))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionAbortedError):
+                    pass
+                return None
             with LOCK:
                 logText = ''.join(session['log'][-400:])
             if tail == 'log':
@@ -603,6 +630,15 @@ class Handler(BaseHTTPRequestHandler):
                                                  payload.get('options')),
                 'saved': report_api.analysisPath(folder, fileName),
             }
+            # A document written on an earlier run sits beside the analysis.
+            # Recording it means the reader can open what already exists
+            # instead of regenerating it to get a link.
+            existing = os.path.join(
+                folder, os.path.splitext(
+                    payload.get('file_name') or fileName)[0] + '.pdf')
+            if os.path.isfile(existing):
+                SESSIONS[sessionId]['pdf'] = os.path.abspath(existing)
+
             note = ('Loaded the analysis of %s saved %s. The recording was not '
                     'analysed again.' % (fileName, payload.get('saved')))
             if missing:
@@ -647,12 +683,26 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'open':
                 target = session.get('pdf')
                 if not target or not os.path.isfile(target):
-                    return self._send(404, {'error': 'no document yet'})
+                    return self._send(404, {'error': 'no document has been '
+                                                     'written in this session'})
                 try:
                     os.startfile(target)  # noqa: S606 - Windows shell open
                 except AttributeError:
                     webbrowser.open('file:///%s' % target.replace('\\', '/'))
-                return self._send(200, {'ok': True})
+                except OSError as e:
+                    # No association, or the shell refused. Only AttributeError
+                    # was caught before, so this became a 500 the button
+                    # swallowed.
+                    return self._send(500, {
+                        'error': 'Windows would not open %s (%s). The document '
+                                 'is there; open it from the folder, or use '
+                                 'View in browser.' % (target, e)})
+                return self._send(200, {'ok': True, 'path': target,
+                                        'note': 'Asked Windows to open it. With '
+                                                'no default PDF application it '
+                                                'shows the "how do you want to '
+                                                'open this file" picker, which '
+                                                'can appear behind this window.'})
 
         return self._send(404, {'error': 'unknown endpoint'})
 

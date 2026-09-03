@@ -699,6 +699,18 @@ Give an explicit output folder and it is used as-is, so everything can still be
 collected in one place: the **Output folder** field in the front end, `--out`
 for `batch_report.py`, `dest_pdfPath` in an options file.
 
+#### Opening the document
+
+**View document** serves it over the loopback connection and the browser opens
+it in a tab, which needs no PDF application installed. **Open outside the
+browser** hands it to Windows instead - which shows the *how do you want to open
+this file* picker when no default PDF application is set, and can put that
+picker behind the browser window. That is why the only button used to look
+broken; both now report what happened.
+
+A restored analysis finds a document written on an earlier run beside it, so
+there is no need to regenerate one just to read it.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,

@@ -29,7 +29,7 @@ var RAIL = [
 
 // What this page needs from the API. The server reports its own; a lower number
 // means the server is running code older than this file.
-var API_EXPECTED = 3;
+var API_EXPECTED = 4;
 
 var PROV_LABEL = {
   measured: 'Measured',
@@ -979,16 +979,42 @@ function renderGenerate() {
         (S.data ? '<p style="margin:4px 0">' + esc(S.data) +
           '<span class="basis">the same report as structured SCORE data, ' +
           'carrying the provenance of every value and your overrides</span></p>' : '') +
-        '<div class="head-actions"><button class="btn" id="openBtn">' +
-        'Open document</button></div></div>';
+        '<div class="head-actions">' +
+        // Opened by the browser, in a new tab. Asking the server to hand it to
+        // Windows put the reader behind this window and looked like nothing.
+        '<button class="btn" data-primary id="viewBtn">View document</button>' +
+        '<button class="btn" id="openBtn">Open outside the browser</button>' +
+        '</div>' +
+        '<span class="basis" id="openNote">View opens it here, which needs no ' +
+        'PDF application installed. Opening it outside hands it to Windows, ' +
+        'which asks how to open it when no default is set.</span></div>';
     }
   }
   html += '<h3 class="sub">Log</h3><pre class="log">' + esc(S.log || '(nothing yet)') + '</pre>';
   document.getElementById('main').innerHTML = html;
   var gen = document.getElementById('genBtn');
   if (gen) gen.onclick = generate;
+  var view = document.getElementById('viewBtn');
+  if (view) {
+    view.onclick = function () {
+      window.open('/api/session/' + S.session + '/document', '_blank');
+    };
+  }
   var open = document.getElementById('openBtn');
-  if (open) open.onclick = function () { api('/api/session/' + S.session + '/open', 'POST', {}); };
+  if (open) {
+    open.onclick = function () {
+      var note = document.getElementById('openNote');
+      if (note) note.textContent = 'Opening\u2026';
+      // The result is reported either way. This button used to ignore both
+      // success and failure, so a refusal was indistinguishable from a
+      // window that had opened behind the browser.
+      api('/api/session/' + S.session + '/open', 'POST', {})
+        .then(function (r) { if (note) note.textContent = r.note || 'Opened.'; })
+        .catch(function (e) {
+          if (note) note.textContent = String(e.message || e);
+        });
+    };
+  }
   wireEmpty();
 }
 
