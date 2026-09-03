@@ -649,9 +649,29 @@ function rowControl(sectionId, row, wide) {
       (wide ? '' : ';min-width:170px') + '" placeholder="type here">' +
       esc(current) + '</textarea>';
   }
+  // 'accept or type' promised an action with no control for it. A value can now
+  // be accepted as it stands, and the box only changes it.
   return '<input type="text" ' + id + ' value="' + esc(current) +
-    '" placeholder="accept or type" style="min-width:' +
-    (wide ? '320' : '150') + 'px">';
+    '" placeholder="' + (row.value ? 'type to change it' : 'type here') +
+    '" style="min-width:' + (wide ? '320' : '150') + 'px">';
+}
+
+/* Accepting a value the analysis produced.
+ *
+ * Agreeing with a measurement is a real answer, and it was the one answer the
+ * screen could not record: a provisional value stayed on the outstanding list
+ * until someone typed a different number, so the only way to clear it was to
+ * disagree with it.
+ */
+function acceptControl(sectionId, row) {
+  if (!row.editable || row.override) return '';
+  var accepted = !!row.accepted;
+  return '<button class="mini" data-accept="' + esc(row.id) +
+    '" data-section="' + esc(sectionId) + '" aria-pressed="' +
+    (accepted ? 'true' : 'false') + '" title="' +
+    (accepted ? 'Accepted as it stands - click to undo'
+              : 'Agree with this value as it stands') + '">' +
+    (accepted ? 'Accepted' : 'Accept') + '</button>';
 }
 
 function rowsTable(sec) {
@@ -664,12 +684,19 @@ function rowsTable(sec) {
     html += '<tr><td>' + esc(r.label) + '</td>' +
       '<td class="value">' + esc(r.value) +
       (r.provisional ? '<span class="tag-provisional">Provisional</span>' : '') +
+      (r.accepted && !r.override
+        ? '<span class="tag-accepted">Accepted</span>' : '') +
       (r.basis ? '<span class="basis">' + esc(r.basis) + '</span>' : '') + '</td>' +
       '<td>' + prov(r.provenance) +
       (r.confidence ? '<span class="basis">confidence: ' + esc(r.confidence) + '</span>' : '') +
-      '</td><td class="nowrap">' +
-      (r.editable ? rowControl(sec.id, r)
-                  : '<span class="basis">read from the study</span>') +
+      // Not nowrap: the box and the Accept button together are wider than the
+      // column, and holding them on one line pushed the button off the edge of
+      // the table where it could not be clicked.
+      '</td><td>' +
+      (r.editable
+        ? '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+          rowControl(sec.id, r) + acceptControl(sec.id, r) + '</div>'
+        : '<span class="basis">read from the study</span>') +
       '</td></tr>';
   });
   return html + '</tbody></table>';
@@ -1022,7 +1049,8 @@ function readerEntriesPanel() {
     html += '<tr><td>' + esc(entry.row.label) +
       (entry.row.basis ? '<span class="basis">' + esc(entry.row.basis) +
         '</span>' : '') +
-      '</td><td>' + rowControl(entry.section.id, entry.row, true) + '</td></tr>';
+      '</td><td>' + rowControl(entry.section.id, entry.row, true) + ' ' +
+      acceptControl(entry.section.id, entry.row) + '</td></tr>';
   });
   return html + '</tbody></table></div>';
 }
@@ -1278,6 +1306,16 @@ function wireRowInputs(root) {
         var edits = {};
         edits[input.getAttribute('data-row')] = (input.value || '').trim();
         sendOverride(input.getAttribute('data-section'), edits);
+      };
+    });
+  Array.prototype.forEach.call(root.querySelectorAll('[data-accept]'),
+    function (button) {
+      button.onclick = function () {
+        var edits = {};
+        edits[button.getAttribute('data-accept')] = {
+          accepted: button.getAttribute('aria-pressed') !== 'true'
+        };
+        sendOverride(button.getAttribute('data-section'), edits);
       };
     });
 }

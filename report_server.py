@@ -441,6 +441,34 @@ def applyToResults(results, report):
         if section['id'] == 'pdr' and results.get('pdr'):
             for row in section.get('rows') or []:
                 key = row['id'][4:] if row['id'].startswith('pdr_') else None
+                if key and row.get('accepted') and not row.get('override') \
+                        and key in results['pdr']:
+                    # Agreed with as measured. Worth recording: a provisional
+                    # value a reader has confirmed is not the same as one nobody
+                    # has looked at, and the report should not keep calling it
+                    # provisional.
+                    entry = results['pdr'][key]
+                    basis = (entry.get('basis') or '').strip()
+                    if entry.get('provisional'):
+                        # The basis for a provisional value opens with
+                        # 'provisional:' and closes by asking the reader to
+                        # confirm it visually. Both are now answered, and
+                        # leaving them in made the report say the value was
+                        # provisional and accepted in the same breath.
+                        if basis.lower().startswith('provisional:'):
+                            basis = basis.split(':', 1)[1].strip()
+                        for tail in (' - confirm visually', '- confirm visually',
+                                     'confirm visually'):
+                            if basis.lower().endswith(tail):
+                                basis = basis[:-len(tail)].rstrip(' .-')
+                                break
+                        basis = ('accepted by the reader; measured as %s'
+                                 % basis) if basis else 'accepted by the reader'
+                    else:
+                        basis = ('%s. Accepted by the reader' % basis).strip('. ')                             if basis else 'accepted by the reader'
+                    entry['basis'] = basis
+                    entry['provisional'] = False
+                    entry['accepted'] = True
                 if key and row.get('override') and key in results['pdr']:
                     entry = results['pdr'][key]
                     # The measurement is kept, not replaced. A reader's scored

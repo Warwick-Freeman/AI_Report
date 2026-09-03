@@ -690,6 +690,21 @@ first one's figures into it.
 If the figures are gone the analysis still loads and can be reviewed, and the
 Generate screen says why a document cannot be written from it.
 
+#### Accepting a value
+
+Every editable value carries an **Accept** button beside its box. Accepting
+records that the reader looked at the value and agreed with it: the value and
+its provenance are untouched - it is still the analysis's number - but it stops
+being provisional, drops off the outstanding list, and the report says
+*accepted by the reader* rather than *provisional*.
+
+That was the one response the screens could not record. A provisional
+measurement stayed outstanding until somebody typed a different number, so
+agreeing with the analysis was impossible to express - and the box said
+"accept or type" while offering no way to accept.
+
+Typing a value overrides it instead, which counts as accepted too.
+
 #### Completing what SCORE leaves to the reader
 
 Everything SCORE reserves for the electroencephalographer is gathered on the

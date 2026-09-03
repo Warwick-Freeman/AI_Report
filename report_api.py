@@ -152,13 +152,26 @@ def _row(label, value, provenance, basis='', confidence='', provisional=False,
         # belongs on the list of things to complete before generating.
         'reader': bool(reader),
         'override': None,
+        # Whether the reader has looked at this value and agreed with it.
+        #
+        # Distinct from an override, which replaces the value, and from doing
+        # nothing at all. A provisional measurement the reader agrees with used
+        # to sit on the outstanding list for ever, because the only way to clear
+        # it was to type a different value - so agreeing with the analysis was
+        # the one response the screen had no way to record.
+        'accepted': False,
     }
 
 
 def _outstanding(rows):
-    """Rows a reader still has to answer: nothing scored, or a provisional one."""
+    """Rows a reader still has to answer: nothing scored, or a provisional one.
+
+    An accepted row is answered. So is an overridden one.
+    """
     out = []
     for row in rows:
+        if row.get('accepted') or row.get('override'):
+            continue
         if row['provenance'] == NONE:
             # The value often is the words 'Not scored', which repeated back
             # explains nothing; the basis says why it could not be scored.
@@ -798,11 +811,27 @@ def applyOverrides(report, overrides):
         if 'included' in edits:
             section['included'] = bool(edits['included'])
         for row in section.get('rows') or []:
-            if row['id'] in edits:
-                row['override'] = edits[row['id']]
-                row['value'] = edits[row['id']]
-                row['provenance'] = HUMAN
-                row['provisional'] = False
+            if row['id'] not in edits:
+                continue
+            edit = edits[row['id']]
+            if isinstance(edit, dict) and 'accepted' in edit:
+                # Agreed with as it stands. The value and its provenance are
+                # untouched - it is still the analysis's number - but it is no
+                # longer provisional and no longer outstanding, because a human
+                # has now looked at it.
+                row['accepted'] = bool(edit['accepted'])
+                if row['accepted']:
+                    row['provisional'] = False
+                continue
+            if edit in (None, ''):
+                # Cleared: back to whatever the analysis said.
+                row['override'] = None
+                continue
+            row['override'] = edit
+            row['value'] = edit
+            row['provenance'] = HUMAN
+            row['provisional'] = False
+            row['accepted'] = True
         for finding in section.get('findings') or []:
             edit = edits.get(finding['id'])
             if isinstance(edit, dict):

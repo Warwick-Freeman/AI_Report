@@ -109,6 +109,12 @@ h3.sub{margin:14px 0 2px;font-size:11px;letter-spacing:.14em;text-transform:uppe
 .prov[data-kind="human"] i{border-radius:50%;background:var(--p-prov-human);width:10px;height:10px}
 .prov[data-kind="none"] i{border:1.5px dashed var(--p-text-disabled);border-radius:50%;width:10px;height:10px}
 .prov span{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--p-text-secondary)}
+/* Accepted as it stands: the analysis's value, confirmed by a human. Marked in
+   the human-scored colour because a person has now signed up to it, but as a
+   tag rather than a provenance mark - the value is still the analysis's. */
+.tag-accepted{font-size:9px;letter-spacing:.07em;text-transform:uppercase;
+  border:1px solid var(--p-prov-human);color:var(--p-prov-human);
+  padding:0 4px;border-radius:2px;white-space:nowrap;margin-left:6px}
 .tag-provisional{font-size:9px;letter-spacing:.07em;text-transform:uppercase;
   border:1px dashed var(--p-border-strong);color:var(--p-text-secondary);
   padding:0 4px;border-radius:2px;white-space:nowrap;margin-left:6px}
