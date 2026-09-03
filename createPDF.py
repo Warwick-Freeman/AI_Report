@@ -22,6 +22,28 @@ from recording import _hms
 # document while these are still beside it.
 FIGURE_COUNT = 6
 
+# What each figure actually shows, keyed by the index it is written under.
+#
+# Keyed rather than positional: the figures are not drawn in the order they are
+# numbered - eeg0 comes from plotTopMaps and eeg5 from drawEpochs - and a
+# positional list is what put every caption in the Word document against the
+# wrong picture. Each was read off the figure itself:
+#
+#   0  plotTopMaps        delta/theta/alpha/beta maps, three normalisations
+#   1  drawLeftRightDiff  'Left/Right power ratio, left is positive'
+#   2  drawPsds           'Posterior power spectrum density'
+#   3  drawFreqPower      per-pair spectra: O1-O2, T5-T6, ... Fp1-Fp2
+#   4  plotSpectrogram    the spectrogram
+#   5  drawEpochs         the traces, 4 s to a page
+FIGURE_CAPTIONS = {
+    0: 'Band-power topographic maps (delta, theta, alpha, beta)',
+    1: 'Left/right power ratio by electrode pair',
+    2: 'Posterior power spectral density',
+    3: 'Power spectrum by electrode pair, left against right',
+    4: 'Spectrogram',
+    5: 'EEG traces, 4 s epochs',
+}
+
 
 def figureNames(fileName):
     """The report's figure filenames for one study.
@@ -173,12 +195,18 @@ class writePDF:
         pdf.add_page(orientation = 'P')
         # set page horizontal
         # eeg5.jpg
-        pdf.cell(196, line_height, text='Power Spectrum Topomap', ln=1, align='C')
-        # pdf.set_font(fontName, size=12)
-        # pdf.cell(196, line_height-3, text=self.fileName, ln=1, align='C' )
+        # 'Power Spectrum Topomap' described only the first of the three
+        # figures on this page, so the other two were captioned by something
+        # they are not.
+        pdf.cell(196, line_height, text='Spectral Analysis', ln=1, align='C')
         # Three figures stacked: give each what is left after the ones above it,
-        # so the last one shrinks rather than running off the page.
-        for figure in self.figures[:3]:
+        # so the last one shrinks rather than running off the page. Each carries
+        # its own caption, since one page title cannot describe three figures.
+        for index, figure in enumerate(self.figures[:3]):
+            pdf.set_font(fontName, size=11)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(196, line_height - 2, align='C', ln=1,
+                     text=FIGURE_CAPTIONS.get(index, ''))
             self._placeImage(pdf, figure)
 
         
@@ -350,7 +378,7 @@ class writePDF:
         pdf.add_page(orientation = 'L')
         # set page horizontal    
         # eeg5.jpg
-        pdf.cell(0, line_height, text='EEG, 4s/epochs', ln=1, align='C')
+        pdf.cell(0, line_height, text=FIGURE_CAPTIONS[5], ln=1, align='C')
         # A square figure at full landscape width would be 280 mm tall on a
         # 210 mm page, so it has to be fitted to the height as well.
         self._placeImage(pdf, self.figures[5], top=20)
@@ -359,14 +387,16 @@ class writePDF:
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
-        pdf.cell(0, 20, text='Topography and Power Spectrum', ln=1, align='C')
+        # This page holds eight per-electrode-pair spectra and no topography,
+        # so 'Topography and Power Spectrum' named something that is not here.
+        pdf.cell(0, 20, text=FIGURE_CAPTIONS[3], ln=1, align='C')
         self._placeImage(pdf, self.figures[3], top=25)
 
         # 第三頁
         pdf.add_page()
         pdf.set_font(fontName, size=18)
         # 標題
-        pdf.cell(0, 20, text='Spectrogram', ln=1, align='C')
+        pdf.cell(0, 20, text=FIGURE_CAPTIONS[4], ln=1, align='C')
         self._placeImage(pdf, self.figures[4], top=25)
         self.writePdrPage(pdf, fontName, line_height, wanted('pdr', results.get('pdr')))
         self.writeInterictalPage(pdf, fontName, line_height, wanted('interictal', results.get('interictal')))

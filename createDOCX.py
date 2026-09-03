@@ -23,7 +23,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-from createPDF import figureNames
+from createPDF import FIGURE_CAPTIONS, figureNames
 from recording import _hms
 
 # Grey, for the basis lines that sit under a value. The same distinction the
@@ -34,27 +34,8 @@ BASIS_GREY = RGBColor(0x69, 0x69, 0x69)
 # adds up to this or less; Word will otherwise widen the table past the margin.
 PAGE_WIDTH_IN = 7.1
 
-# What each figure actually shows.
-#
-# Keyed by the index createPDF writes, not by position in a list. The figures
-# are not drawn in the order they are numbered - eeg0 comes from plotTopMaps
-# and eeg5 from drawEpochs - and a positional tuple quietly put every caption
-# against the wrong picture. Each of these was read off the figure itself:
-#
-#   0  plotTopMaps        delta/theta/alpha/beta maps, three normalisations
-#   1  drawLeftRightDiff  'Left/Right power ratio, left is positive'
-#   2  drawPsds           'Posterior power spectrum density'
-#   3  drawFreqPower      per-pair spectra: O1-O2, T5-T6, ... Fp1-Fp2
-#   4  plotSpectrogram    the spectrogram
-#   5  drawEpochs         the traces, 4 s to a page
-FIGURE_CAPTIONS = {
-    0: 'Band-power topographic maps (delta, theta, alpha, beta)',
-    1: 'Left/right power ratio by electrode pair',
-    2: 'Posterior power spectral density',
-    3: 'Power spectrum by electrode pair, left against right',
-    4: 'Spectrogram',
-    5: 'EEG traces, 4 s epochs',
-}
+# The captions come from createPDF, so the two documents cannot label the same
+# figure differently - which they did until the Word captions were corrected.
 
 
 def writeDOCX(fileName, results, dest_folder, ai_report_text=None,
