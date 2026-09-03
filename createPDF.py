@@ -671,14 +671,22 @@ class writePDF:
         self._row(pdf, list(zip(('Property', 'Proposed term', 'Confidence'), widths)),
                   rowHeight, fill=True)
 
-        category = conclusion.get('category') or '(none proposed - reader to score)'
+        # 'significance' is what the reader scored on the review screens;
+        # 'category' is what the language model proposed. The reader's answer
+        # wins, and the PDF used to read only the proposal - so a category
+        # chosen before generating never appeared here.
+        category = (conclusion.get('significance') or conclusion.get('category')
+                    or '(none proposed - reader to score)')
         if category.startswith('Abnormal'):
             pdf.set_text_color(170, 0, 0)
         self._row(pdf, (('Significance', widths[0]), (category, widths[1]),
                         (conclusion.get('confidence') or '', widths[2])), rowHeight)
         pdf.set_text_color(0, 0, 0)
 
-        yields = conclusion.get('yields') or []
+        # Likewise the yield: 'yield' is the reader's single choice, 'yields'
+        # the model's proposed list.
+        chosen = conclusion.get('yield')
+        yields = ([chosen] if chosen else (conclusion.get('yields') or []))
         if yields:
             for y in yields:
                 self._row(pdf, (('Diagnostic yield', widths[0]), (y, widths[1]),
@@ -729,11 +737,15 @@ class writePDF:
         pdf.cell(196, line_height - 1, text='For completion by the reader', ln=1,
                  align='L')
         pdf.set_font(fontName, size=10)
+        entered = {'Electroencephalographer': (conclusion or {}).get('reported_by'),
+                   'Date': (conclusion or {}).get('report_date')}
         for label in ('Diagnostic significance as scored',
                       'Clinical correlation', 'Electroencephalographer', 'Date'):
+            answer = entered.get(label)
             pdf.set_x(pdf.l_margin)
             pdf.cell(60, line_height, text='   ' + label, border=0, align='L')
-            pdf.cell(136, line_height, text='', border='B', align='L')
+            pdf.cell(136, line_height, text=(' ' + str(answer)) if answer else '',
+                     border='B', align='L')
             pdf.ln(line_height)
         pdf.set_font(fontName, size=8)
         pdf.set_text_color(105, 105, 105)
@@ -835,6 +847,20 @@ class writePDF:
             pdf.ln(2)
 
         outstanding = described.get('technologist_fields') or []
+        # Answers given before the document was made are printed; only what
+        # was left unanswered is still asked for. A reader who filled a field in
+        # and then saw it printed as a blank line would type it again.
+        entered = (described or {}).get('technologist_entries') or {}
+        if entered:
+            pdf.set_font(fontName, size=13)
+            pdf.cell(196, line_height, text='Observed by the technologist', ln=1,
+                     align='L')
+            pdf.set_font(fontName, size=10)
+            for field, answer in entered.items():
+                self._row(pdf, ((field, 70), (str(answer), 126)),
+                          line_height - 1)
+        outstanding = [f for f in outstanding if not entered.get(f)]
+
         if outstanding:
             pdf.set_font(fontName, size=13)
             pdf.cell(196, line_height, text='For completion by the reader', ln=1, align='L')
@@ -1017,17 +1043,43 @@ class writePDF:
                           line_height - 3.5)
             pdf.set_font(fontName, size=9)
 
+        # What the reader answered about each episode, under that episode. With
+        # more than one seizure a single pooled list could not say which one it
+        # described.
+        anyEntered = False
+        for index, episode in enumerate(episodes):
+            entries = episode.get('reader_entries') or {}
+            if not entries:
+                continue
+            anyEntered = True
+            onset = episode.get('onset_seconds')
+            where = _hms(onset) if onset is not None else 'episode %d' % (index + 1)
+            pdf.ln(2)
+            pdf.set_font(fontName, size=11)
+            self._row(pdf, [('Clinical detail - %s' % where, 196)],
+                      line_height - 1)
+            pdf.set_font(fontName, size=9)
+            for field, answer in entries.items():
+                self._row(pdf, ((field, 76), (str(answer), 120)),
+                          line_height - 1)
+
         pdf.ln(3)
         pdf.set_font(fontName, size=11)
-        pdf.cell(196, line_height - 1, text='For completion by the reader', ln=1,
-                 align='L')
+        pdf.cell(196, line_height - 1,
+                 text=('Also for completion by the reader' if anyEntered
+                       else 'For completion by the reader'), ln=1, align='L')
         pdf.set_font(fontName, size=10)
-        for field in ('Seizure type (ILAE classification)',
+        answeredFields = set()
+        for episode in episodes:
+            answeredFields.update((episode.get('reader_entries') or {}))
+        for field in ('Seizure type (ILAE 2017)',
                       'Semiology and its somatotopic modifiers',
                       'Ictal EEG pattern and its evolution',
                       'Clinical-EEG temporal relationship',
                       'Consciousness and awareness',
                       'Postictal findings'):
+            if field in answeredFields:
+                continue
             pdf.set_x(pdf.l_margin)
             pdf.cell(196, line_height - 1.5, text='   - ' + field, ln=1, align='L')
         pdf.set_font(fontName, size=8)
@@ -1184,6 +1236,12 @@ class writePDF:
                 self._row(pdf, ((f['name'], widths[0]), (location, widths[1]),
                                 (timing, widths[2]),
                                 (f.get('confidence', ''), widths[3])), rowHeight)
+                if f.get('significance'):
+                    # Judged by the reader before the document was made.
+                    self._subLine(pdf, fontName,
+                                  'Significance: %s' % f['significance'],
+                                  widths[0], line_height - 3.5)
+                    pdf.set_font(fontName, size=9)
 
                 # A location naming several regions is longer than any sensible
                 # column, so repeat it in full below when it had to be cut.

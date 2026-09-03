@@ -428,6 +428,16 @@ def applyToResults(results, report):
                 if answer:
                     procedure['response'] = answer
 
+            # The technologist fields - alertness, time of last meal, skull
+            # defect. These were editable on screen and mapped nowhere, so
+            # whatever was typed into them never reached the report.
+            entered = {}
+            for row in section.get('rows') or []:
+                if row['id'].startswith('tech_') and row.get('override'):
+                    entered[row['label']] = row['override']
+            if entered:
+                results['recording']['technologist_entries'] = entered
+
         if section['id'] == 'pdr' and results.get('pdr'):
             for row in section.get('rows') or []:
                 key = row['id'][4:] if row['id'].startswith('pdr_') else None
@@ -455,12 +465,47 @@ def applyToResults(results, report):
             if block and block.get('findings'):
                 block['findings'] = [f for f in block['findings']
                                      if f.get('name') in keep]
+
+            # An artifact's significance, judged by the reader, onto the finding
+            # it belongs to. The row is keyed by the finding's id, whose tail is
+            # its position in the list.
+            if section['id'] == 'artifacts' and block:
+                byName = {}
+                for row in section.get('rows') or []:
+                    if row['id'].startswith('artifact_significance_') and \
+                            row.get('override'):
+                        label = row['label'].split(' - ', 1)[-1]
+                        byName[label] = row['override']
+                for finding in block.get('findings') or []:
+                    answer = byName.get(finding.get('name'))
+                    if answer:
+                        finding['significance'] = answer
         if section['id'] == 'episodes' and results.get('spikeseizure'):
             keep = {f['name'] for f in section.get('findings') or []
                     if f.get('included', True)}
             episodes = results['spikeseizure'].get('episodes') or []
             results['spikeseizure']['episodes'] = [
                 e for e in episodes if e.get('name') in keep]
+
+            # The electro-clinical half of each episode, which SCORE asks for
+            # and the detector cannot supply. Keyed by the episode's position,
+            # which is how the rows were built.
+            import report_api as api
+            labels = {key: label for key, label, _ in api.EPISODE_FIELDS}
+            for row in section.get('rows') or []:
+                if not row.get('override'):
+                    continue
+                parts = row['id'].split('_', 2)
+                if len(parts) != 3 or parts[0] != 'episode':
+                    continue
+                try:
+                    index = int(parts[1])
+                except ValueError:
+                    continue
+                if index < len(results['spikeseizure']['episodes']):
+                    episode = results['spikeseizure']['episodes'][index]
+                    episode.setdefault('reader_entries', {})[
+                        labels.get(parts[2], parts[2])] = row['override']
         if section['id'] == 'events':
             # The Events screen offers to carry events into the report, and
             # until now nothing did: the selection was recorded and then
@@ -474,13 +519,17 @@ def applyToResults(results, report):
                 for e in section.get('events') or [] if e.get('included')]
 
         if section['id'] == 'conclusion':
-            values = {row['id']: row.get('override') or row.get('value')
-                      for row in section.get('rows') or []}
+            values = {row['id']: row.get('override')
+                      for row in section.get('rows') or []
+                      if row.get('override')}
             conclusion = results.get('conclusion') or {}
-            if values.get('significance'):
-                conclusion['significance'] = values['significance']
-            if values.get('yield'):
-                conclusion['yield'] = values['yield']
+            for rowId, key in (('significance', 'significance'),
+                               ('yield', 'yield'),
+                               ('summary', 'summary'),
+                               ('reported_by', 'reported_by'),
+                               ('report_date', 'report_date')):
+                if values.get(rowId):
+                    conclusion[key] = values[rowId]
             results['conclusion'] = conclusion
     # createPDF skips these pages.
     results['_excluded'] = sorted(excluded)

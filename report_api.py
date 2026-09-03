@@ -122,8 +122,15 @@ def _clean(value):
 
 
 def _row(label, value, provenance, basis='', confidence='', provisional=False,
-         editable=False, rowId=None):
-    """One reviewable line: a value, where it came from, and what backs it."""
+         editable=False, rowId=None, options=None, multiline=False,
+         reader=False):
+    """One reviewable line: a value, where it came from, and what backs it.
+
+    options, where the value is restricted, is the list the reader picks from -
+    SCORE's own or the ILAE's. The front end shows a menu for those and a text
+    box for the rest, so a fixed vocabulary is not retyped three different ways
+    across three reports.
+    """
     if _isUndetermined(value):
         provenance = NONE
     return {
@@ -135,6 +142,15 @@ def _row(label, value, provenance, basis='', confidence='', provisional=False,
         'confidence': confidence or '',
         'provisional': bool(provisional),
         'editable': bool(editable),
+        'options': list(options) if options else None,
+        'multiline': bool(multiline),
+        # A field SCORE leaves to the reader, as opposed to an override of
+        # something the analysis computed. Marked rather than inferred from the
+        # provenance: the PDR frequency is editable and model-provenance, but
+        # accepting or correcting a measured value is a different act from
+        # answering a question the recording cannot answer, and only the second
+        # belongs on the list of things to complete before generating.
+        'reader': bool(reader),
         'override': None,
     }
 
@@ -183,10 +199,14 @@ def recordingSection(recording):
                              basis='read from the study' if not _isUndetermined(value) else '',
                              rowId='%s_%s' % (group, label.lower().replace(' ', '_'))))
     # Fields SCORE wants that no signal can supply.
+    import score_common as sc
     for label in (recording.get('technologist_fields') or []):
+        options = (sc.ALERTNESS_STATES if label.lower().startswith('alertness')
+                   else None)
         rows.append(_row(label, 'Not scored', NONE,
                          basis='for the technologist or the reader to supply',
-                         editable=True, rowId='tech_%s' % label.lower().replace(' ', '_')[:40]))
+                         editable=True, reader=True, options=options,
+                         rowId='tech_%s' % label.lower().replace(' ', '_')[:40]))
     return rows, [], recording.get('durations')
 
 
@@ -244,7 +264,7 @@ def activationRows(activation):
             '%s response' % procedure['name'], 'Not scored', HUMAN,
             basis='whether it produced a change is the reader\'s judgement - %s'
                   % (procedure.get('detail') or procedure.get('basis') or ''),
-            editable=True, rowId=activationResponseId(procedure['name'])))
+            editable=True, reader=True, rowId=activationResponseId(procedure['name'])))
     return rows
 
 
@@ -282,10 +302,74 @@ def _finding(finding, provenance, index, prefix):
     }
 
 
+def artifactRows(findings):
+    """The significance of each artifact, which SCORE leaves to a human.
+
+    The coverage above it is measured; whether the recording could still be read
+    is a judgement, and it is one of three answers rather than free text.
+    """
+    import score_common as sc
+
+    rows = []
+    for finding in findings or []:
+        rows.append(_row(
+            'Significance - %s' % finding['name'], 'Not scored', HUMAN,
+            basis='%s. Whether the recording remains interpretable is the '
+                  'reader\'s judgement' % (finding.get('prevalence') or ''),
+            editable=True, reader=True, options=sc.ARTIFACT_SIGNIFICANCE,
+            rowId='artifact_significance_%s' % finding['id']))
+    return rows
+
+
 def findingSection(block, provenance, prefix):
     findings = [(_finding(f, provenance, i, prefix))
                 for i, f in enumerate((block or {}).get('findings') or [])]
     return findings, list((block or {}).get('notes') or [])
+
+
+# What SCORE asks about an episode that the signal cannot answer, and the
+# vocabulary for each where one exists.
+EPISODE_FIELDS = (
+    ('type', 'Seizure type (ILAE 2017)', 'ILAE_SEIZURE_TYPES'),
+    ('semiology', 'Semiology and its somatotopic modifiers', None),
+    ('pattern', 'Ictal EEG pattern and its evolution', None),
+    ('relationship', 'Clinical-EEG temporal relationship',
+     'CLINICAL_EEG_RELATIONSHIPS'),
+    ('consciousness', 'Consciousness and awareness', 'CONSCIOUSNESS_STATES'),
+    ('postictal', 'Postictal findings', None),
+)
+
+
+def episodeRows(episodes):
+    """One row per episode per unanswered question, for the reader to fill.
+
+    Rows rather than a list of labels: a label printed as a blank line in the
+    document cannot be filled in before the document exists, which is the point
+    of asking. Rows go through the same override and outstanding machinery as
+    everything else.
+    """
+    import score_common as sc
+
+    rows = []
+    for index, episode in enumerate(episodes or []):
+        onset = episode.get('onset_seconds')
+        where = ('the episode at %s' % _hms(onset)) if onset is not None \
+            else ('episode %d' % (index + 1))
+        for key, label, vocabulary in EPISODE_FIELDS:
+            rows.append(_row(
+                '%s - %s' % (label, where), 'Not scored', HUMAN,
+                basis='needs the video and the clinical record',
+                editable=True, reader=True, options=getattr(sc, vocabulary) if vocabulary else None,
+                multiline=vocabulary is None,
+                rowId='episode_%d_%s' % (index, key)))
+    return rows
+
+
+def _hms(seconds):
+    if seconds is None:
+        return ''
+    total = int(round(seconds))
+    return '%d:%02d:%02d' % (total // 3600, (total % 3600) // 60, total % 60)
 
 
 def episodesSection(spikeseizure):
@@ -386,12 +470,25 @@ def conclusionSection(conclusion):
     Anything the LLM drafted is offered as a draft and marked as a model's
     words, never as a scored value.
     """
+    import score_common as sc
     rows = [
         _row('Diagnostic significance', 'Not scored', HUMAN,
              basis='forced choice, reserved for the electroencephalographer',
-             editable=True, rowId='significance'),
+             editable=True, reader=True, options=sc.SIGNIFICANCE_CATEGORIES,
+             rowId='significance'),
         _row('Diagnostic yield', 'Not scored', HUMAN,
-             basis='SCORE list', editable=True, rowId='yield'),
+             basis='SCORE list, limited to what this analysis can support',
+             editable=True, reader=True, options=sorted(sc.SUPPORTABLE_YIELDS),
+             rowId='yield'),
+        _row('Summary and clinical comments', 'Not scored', HUMAN,
+             basis="the reader's own words", editable=True, reader=True, multiline=True,
+             rowId='summary'),
+        _row('Reported by', 'Not scored', HUMAN,
+             basis='the electroencephalographer signing the report',
+             editable=True, reader=True, rowId='reported_by'),
+        _row('Report date', 'Not scored', HUMAN,
+             basis='ISO date, e.g. 2026-09-03', editable=True, reader=True,
+             rowId='report_date'),
     ]
     draft = ''
     if conclusion:
@@ -526,7 +623,8 @@ def buildReport(results, studyPath, options=None):
                      'measures': _clean((results.get('interictal') or {}).get('measures'))})
 
     episodes = episodesSection(results.get('spikeseizure'))
-    sections.append({'id': 'episodes', 'rows': [], 'findings': episodes,
+    sections.append({'id': 'episodes', 'rows': episodeRows(episodes),
+                     'findings': episodes,
                      'notes': (results.get('spikeseizure') or {}).get('notes') or []})
 
     sleepRows, sleepFindings = sleepSection(results.get('sleep'))
@@ -535,8 +633,8 @@ def buildReport(results, studyPath, options=None):
 
     artifactFindings, artifactNotes = findingSection(results.get('artifacts'),
                                                      MEASURED, 'artifact')
-    sections.append({'id': 'artifacts', 'rows': [], 'findings': artifactFindings,
-                     'notes': artifactNotes,
+    sections.append({'id': 'artifacts', 'rows': artifactRows(artifactFindings),
+                     'findings': artifactFindings, 'notes': artifactNotes,
                      'significance_options': list(ARTIFACT_SIGNIFICANCE)})
 
     studyEvents, eventCounts = eventsSection(studyPath)

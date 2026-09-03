@@ -690,6 +690,31 @@ first one's figures into it.
 If the figures are gone the analysis still loads and can be reviewed, and the
 Generate screen says why a document cannot be written from it.
 
+#### Completing what SCORE leaves to the reader
+
+Everything SCORE reserves for the electroencephalographer is gathered on the
+**Generate** screen, so it can be answered before the document exists rather
+than printed as a blank line to fill in by hand afterwards:
+
+| Section | Entries |
+| --- | --- |
+| Patient & recording | alertness, time of last meal, skull defect; the response to each activation procedure |
+| Episodes | per episode: ILAE seizure type, semiology, ictal pattern, clinical-EEG relationship, consciousness, postictal findings |
+| Artifacts | the significance of each artifact |
+| Significance & conclusion | diagnostic significance, diagnostic yield, summary, reported by, date |
+
+**Where the choices are fixed, the reader picks from a list** - SCORE's own
+significance categories and artifact significance, the ILAE 2017 seizure types,
+and the yields this analysis can support. Typing into a fixed vocabulary
+produces `abnormal`, `Abnormal.` and `ABNORMAL` across three reports and none of
+them can be counted afterwards. Where no standard list exists the field stays
+free text, because inventing one would be worse.
+
+An answer given is printed in both the Word document and the PDF; only what was
+left unanswered is still asked for. These are the same fields the section
+screens carry - Generate collects them so a reader who has finished reviewing
+does not have to walk back through five screens to answer them.
+
 #### Where the outputs go
 
 Everything one analysis produces - the figures, the saved analysis, the

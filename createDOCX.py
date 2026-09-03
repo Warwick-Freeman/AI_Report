@@ -347,13 +347,28 @@ def _notes(document, notes, heading='Notes'):
         document.add_paragraph(note, style='List Bullet')
 
 
-def _readerFields(document, fields):
-    """What SCORE wants from the reader, left blank for them to complete."""
-    document.add_heading('For completion by the reader', level=2)
-    for field in fields:
-        paragraph = document.add_paragraph(style='List Bullet')
-        paragraph.add_run('%s: ' % field).bold = True
-        paragraph.add_run('_' * 40)
+def _readerFields(document, fields, entries=None):
+    """What SCORE wants from the reader.
+
+    An answer given before the document was generated is printed. Only what was
+    left unanswered stays a blank line - a field the reader filled in and then
+    saw printed as underscores would send them back to type it a second time.
+    """
+    entries = entries or {}
+    answered = [f for f in fields if entries.get(f)]
+    unanswered = [f for f in fields if not entries.get(f)]
+
+    if answered:
+        for field in answered:
+            paragraph = document.add_paragraph(style='List Bullet')
+            paragraph.add_run('%s: ' % field).bold = True
+            paragraph.add_run(str(entries[field]))
+    if unanswered:
+        document.add_heading('For completion by the reader', level=2)
+        for field in unanswered:
+            paragraph = document.add_paragraph(style='List Bullet')
+            paragraph.add_run('%s: ' % field).bold = True
+            paragraph.add_run('_' * 40)
 
 
 # --------------------------------------------------------------- the sections
@@ -382,7 +397,8 @@ def _recording(document, recording):
 
     fields = recording.get('technologist_fields') or []
     if fields:
-        _readerFields(document, fields)
+        _readerFields(document, fields,
+                      recording.get('technologist_entries'))
 
     _notes(document, recording.get('notes'))
 
@@ -498,13 +514,17 @@ def _episodes(document, episodes, notes):
              widths, basis=episode.get('basis'))
         readerFields = episode.get('reader_fields') or readerFields
 
-    _readerFields(document, readerFields or [
-        'Seizure type (ILAE classification)',
-        'Semiology and its somatotopic modifiers',
-        'Ictal EEG pattern and its evolution',
-        'Clinical-EEG temporal relationship',
-        'Consciousness and awareness',
-        'Postictal findings'])
+    # Each episode's own answers, under its own heading: with more than one
+    # seizure, a single pooled list could not say which episode it described.
+    for index, episode in enumerate(episodes):
+        entries = episode.get('reader_entries') or {}
+        onset = episode.get('onset_seconds')
+        where = ('the episode at %s' % _hms(onset)) if onset is not None \
+            else 'episode %d' % (index + 1)
+        document.add_heading('Clinical detail - %s' % where, level=2)
+        _readerFields(document,
+                      episode.get('reader_fields') or list(entries),
+                      entries)
     _notes(document, notes)
 
 
@@ -573,9 +593,17 @@ def _artifacts(document, artifacts):
                  (finding.get('name'), location.get('text') or '', timing,
                   finding.get('confidence', '')), widths,
                  basis=finding.get('basis'))
-        _readerFields(document, [
-            'Significance (not interpretable / reduced diagnostic value / '
-            'does not interfere with interpretation)'])
+        judged = {f['name']: f['significance'] for f in findings
+                  if f.get('significance')}
+        if judged:
+            document.add_heading('Significance', level=2)
+            for name, significance in judged.items():
+                paragraph = document.add_paragraph(style='List Bullet')
+                paragraph.add_run('%s: ' % name).bold = True
+                paragraph.add_run(significance)
+        unjudged = [f['name'] for f in findings if not f.get('significance')]
+        if unjudged:
+            _readerFields(document, ['Significance - %s' % n for n in unjudged])
     else:
         document.add_paragraph('Analysed. No artifact types were detected.')
     _notes(document, artifacts.get('notes'))
@@ -587,24 +615,33 @@ def _conclusion(document, conclusion):
                      'conclusion for the electroencephalographer. Nothing in '
                      'the analysis writes them.', Inches(0))
 
-    if conclusion:
-        table = _table(document, ('Item', 'Value'), (2.0, 5.0))
-        for label, key in (('Diagnostic significance', 'significance'),
-                           ('Diagnostic yield', 'yield')):
-            _row(table, (label, conclusion.get(key) or 'Not scored'), (2.0, 5.0))
-        for label, key in (('Based on', 'basis'), ('Notes', 'notes')):
-            for line in (conclusion.get(key) or []):
-                _basis(document, line)
-        summary = conclusion.get('summary') or conclusion.get('text')
-        if summary:
-            document.add_heading('Summary and clinical comments', level=2)
-            document.add_paragraph(summary)
+    conclusion = conclusion or {}
+    table = _table(document, ('Item', 'Value'), (2.0, 5.0))
+    for label, key in (('Diagnostic significance', 'significance'),
+                       ('Diagnostic yield', 'yield')):
+        _row(table, (label, conclusion.get(key) or 'Not scored'), (2.0, 5.0))
+    for key in ('basis', 'notes'):
+        for line in (conclusion.get(key) or []):
+            _basis(document, line)
 
-    _readerFields(document, ['Diagnostic significance (normal recording / '
-                             'abnormal recording / no definite abnormality)',
-                             'Diagnostic yield (from SCORE\'s list)',
-                             'Summary and clinical comments',
-                             'Reported by', 'Date'])
+    summary = conclusion.get('summary') or conclusion.get('text')
+    if summary:
+        document.add_heading('Summary and clinical comments', level=2)
+        document.add_paragraph(summary)
+
+    # Signed by, and when. Printed where given, asked for where not.
+    signature = {'Reported by': conclusion.get('reported_by'),
+                 'Date': conclusion.get('report_date')}
+    document.add_heading('Sign-off', level=2)
+    _readerFields(document, list(signature), signature)
+
+    outstanding = [label for label, key in
+                   (('Diagnostic significance', 'significance'),
+                    ('Diagnostic yield', 'yield'),
+                    ('Summary and clinical comments', 'summary'))
+                   if not conclusion.get(key)]
+    if outstanding:
+        _readerFields(document, outstanding)
 
 
 def _narrative(document, text):

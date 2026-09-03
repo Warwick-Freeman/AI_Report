@@ -239,3 +239,64 @@ def incidenceBand(count, analysedSeconds):
         if rate < limit:
             return label, rate
     return INCIDENCE_BANDS[-1][1], rate
+
+# Vocabularies for the entries SCORE leaves to the electroencephalographer.
+#
+# Where SCORE or the ILAE fixes the choices, the reader picks from them rather
+# than typing: a free-text box invites 'abnormal', 'Abnormal.' and 'ABNORMAL'
+# into the same field across three reports, and none of them can be counted
+# afterwards. Where no standard list exists the field stays free text, because
+# inventing one would be worse than leaving it open.
+
+# SCORE Table 15. The measurement says how much of the recording an artifact
+# covers; whether that ruined it is a judgement about what could still be read.
+ARTIFACT_SIGNIFICANCE = (
+    'Does not interfere with interpretation',
+    'Reduced diagnostic value',
+    'Not interpretable',
+)
+
+# ILAE 2017 operational classification of seizure types, expanded basic level.
+# An electrographic detection is not one of these on its own - the classification
+# needs the semiology and the clinical record, which is why it is the reader's.
+ILAE_SEIZURE_TYPES = (
+    'Focal aware',
+    'Focal impaired awareness',
+    'Focal motor onset',
+    'Focal non-motor onset',
+    'Focal to bilateral tonic-clonic',
+    'Generalised motor - tonic-clonic',
+    'Generalised motor - other',
+    'Generalised non-motor - absence',
+    'Unknown onset - motor, tonic-clonic',
+    'Unknown onset - non-motor',
+    'Unclassified',
+)
+
+# Whether the patient was aware and responsive during an episode.
+CONSCIOUSNESS_STATES = (
+    'Aware and responsive',
+    'Aware, not responsive',
+    'Impaired awareness',
+    'Not possible to determine',
+)
+
+# How the clinical event and the EEG change relate in time.
+CLINICAL_EEG_RELATIONSHIPS = (
+    'EEG change precedes the clinical event',
+    'Simultaneous',
+    'Clinical event precedes the EEG change',
+    'No clinical event observed',
+    'Not possible to determine',
+)
+
+# Alertness, which SCORE records as part of the recording conditions.
+ALERTNESS_STATES = (
+    'Awake and cooperative',
+    'Awake, poorly cooperative',
+    'Drowsy',
+    'Asleep',
+    'Obtunded',
+    'Comatose',
+    'Not recorded',
+)

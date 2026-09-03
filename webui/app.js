@@ -627,6 +627,33 @@ function sectionEmpty(sec) {
   return '';
 }
 
+/* The control a row's value is entered with.
+ *
+ * A menu where SCORE or the ILAE fixes the choices, a box where they do not.
+ * Typing into a fixed vocabulary produces 'abnormal', 'Abnormal.' and
+ * 'ABNORMAL' across three reports and none of them can be counted afterwards.
+ */
+function rowControl(sectionId, row, wide) {
+  var id = 'data-row="' + esc(row.id) + '" data-section="' + esc(sectionId) + '"';
+  var current = row.override || '';
+  if (row.options && row.options.length) {
+    return '<select ' + id + ' style="min-width:' + (wide ? '320' : '170') + 'px">' +
+      '<option value="">not scored</option>' +
+      row.options.map(function (option) {
+        return '<option value="' + esc(option) + '"' +
+          (current === option ? ' selected' : '') + '>' + esc(option) + '</option>';
+      }).join('') + '</select>';
+  }
+  if (row.multiline) {
+    return '<textarea ' + id + ' style="min-height:60px' +
+      (wide ? '' : ';min-width:170px') + '" placeholder="type here">' +
+      esc(current) + '</textarea>';
+  }
+  return '<input type="text" ' + id + ' value="' + esc(current) +
+    '" placeholder="accept or type" style="min-width:' +
+    (wide ? '320' : '150') + 'px">';
+}
+
 function rowsTable(sec) {
   if (!sec.rows || !sec.rows.length) return '';
   var html = '<table><thead><tr><th scope="col">Property</th><th scope="col">Scored value</th>' +
@@ -641,10 +668,8 @@ function rowsTable(sec) {
       '<td>' + prov(r.provenance) +
       (r.confidence ? '<span class="basis">confidence: ' + esc(r.confidence) + '</span>' : '') +
       '</td><td class="nowrap">' +
-      (r.editable
-        ? '<input type="text" data-row="' + esc(r.id) + '" data-section="' + esc(sec.id) +
-        '" value="' + esc(r.override || '') + '" placeholder="accept or type" style="min-width:150px">'
-        : '<span class="basis">read from the study</span>') +
+      (r.editable ? rowControl(sec.id, r)
+                  : '<span class="basis">read from the study</span>') +
       '</td></tr>';
   });
   return html + '</tbody></table>';
@@ -950,6 +975,58 @@ function renderOutstanding() {
   wireEmpty();
 }
 
+/* Everything SCORE leaves to the reader, gathered where the report is made.
+ *
+ * These are all editable on their own section screens, but a reader who has
+ * reviewed the findings and reached Generate should not have to walk back
+ * through five screens to answer them - and anything left unanswered is printed
+ * as a blank line for them to fill in by hand afterwards, which is worse than
+ * asking here.
+ */
+function readerEntries() {
+  var out = [];
+  ((S.report || {}).sections || []).forEach(function (sec) {
+    if (sec.included === false) return;
+    (sec.rows || []).forEach(function (row) {
+      // row.reader, not a provenance guess: accepting a measured PDR value is
+      // a different act from answering what the recording cannot answer.
+      if (row.reader) {
+        out.push({ section: sec, row: row });
+      }
+    });
+  });
+  return out;
+}
+
+function readerEntriesPanel() {
+  var entries = readerEntries();
+  if (!entries.length) return '';
+
+  var answered = entries.filter(function (e) { return e.row.override; }).length;
+  var html = '<div class="panel"><h3 class="sub">For completion by the reader' +
+    '</h3><p class="job">' +
+    esc(answered + ' of ' + entries.length + ' answered. What is filled in ' +
+        'here is written into the report; what is left is printed as a blank ' +
+        'line to complete by hand. Where SCORE or the ILAE fixes the choices, ' +
+        'the list is those choices.') + '</p>';
+
+  var lastSection = null;
+  html += '<table><thead><tr><th scope="col">Entry</th>' +
+    '<th scope="col">Value</th></tr></thead><tbody>';
+  entries.forEach(function (entry) {
+    if (entry.section.id !== lastSection) {
+      lastSection = entry.section.id;
+      html += '<tr><td colspan="2" class="value">' +
+        esc(entry.section.label) + '</td></tr>';
+    }
+    html += '<tr><td>' + esc(entry.row.label) +
+      (entry.row.basis ? '<span class="basis">' + esc(entry.row.basis) +
+        '</span>' : '') +
+      '</td><td>' + rowControl(entry.section.id, entry.row, true) + '</td></tr>';
+  });
+  return html + '</tbody></table></div>';
+}
+
 function renderGenerate() {
   var ready = S.status === 'ready' && S.canGenerate;
   var actions = ready
@@ -993,6 +1070,8 @@ function renderGenerate() {
       esc(chosen ? ', using the template ' + chosen.name
                  : ', using the report\'s own layout') +
       '.</p></div>';
+
+    html += readerEntriesPanel();
 
     html += '<div class="panel"><h3 class="sub">Included sections</h3><ul class="plain">';
     S.report.sections.forEach(function (s) {
@@ -1041,6 +1120,7 @@ function renderGenerate() {
   }
   html += '<h3 class="sub">Log</h3><pre class="log">' + esc(S.log || '(nothing yet)') + '</pre>';
   document.getElementById('main').innerHTML = html;
+  wireRowInputs(document.getElementById('main'));
   var gen = document.getElementById('genBtn');
   if (gen) gen.onclick = generate;
   var docx = document.getElementById('docxBtn');
@@ -1190,6 +1270,18 @@ function sendOverride(sectionId, edits) {
     .catch(function (e) { console.error(e); });
 }
 
+function wireRowInputs(root) {
+  if (!root) return;
+  Array.prototype.forEach.call(root.querySelectorAll('[data-row]'),
+    function (input) {
+      input.onchange = function () {
+        var edits = {};
+        edits[input.getAttribute('data-row')] = (input.value || '').trim();
+        sendOverride(input.getAttribute('data-section'), edits);
+      };
+    });
+}
+
 function wireSection(sec) {
   var main = document.getElementById('main');
 
@@ -1200,13 +1292,7 @@ function wireSection(sec) {
     };
   }
 
-  Array.prototype.forEach.call(main.querySelectorAll('[data-row]'), function (input) {
-    input.onchange = function () {
-      var edits = {};
-      edits[input.getAttribute('data-row')] = input.value.trim();
-      sendOverride(input.getAttribute('data-section'), edits);
-    };
-  });
+  wireRowInputs(main);
 
   Array.prototype.forEach.call(main.querySelectorAll('[data-finding]'), function (box) {
     box.onchange = function () {
