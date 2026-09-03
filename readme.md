@@ -787,6 +787,13 @@ Four rules, each there for a reason:
   over time, and which letterhead and boilerplate a report was signed under is
   the question asked afterwards.
 
+The template and the format are chosen **when the document is written**, not
+when the recording was analysed - a saved analysis loads before the reader has
+picked anything, so they travel with the Generate request. The Generate screen
+names which template it will use. A template that cannot be opened is reported
+rather than quietly ignored, which is indistinguishable from the setting not
+having been read.
+
 Templates must be `.docx`. ProfusionEEG's shipped templates are Word 97 `.doc`,
 which `python-docx` cannot read - re-save one as `.docx` in Word and its tokens
 carry across unchanged.

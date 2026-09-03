@@ -29,7 +29,7 @@ var RAIL = [
 
 // What this page needs from the API. The server reports its own; a lower number
 // means the server is running code older than this file.
-var API_EXPECTED = 6;
+var API_EXPECTED = 7;
 
 var PROV_LABEL = {
   measured: 'Measured',
@@ -984,6 +984,16 @@ function renderGenerate() {
           'Set an output folder on Report home to collect reports elsewhere.') +
       '</p></div>';
 
+    var chosen = (S.templates || []).filter(function (e) {
+      return e.path === S.options.docxTemplate;
+    })[0];
+    html += '<div class="panel"><h3 class="sub">Format</h3><p class="job">' +
+      esc({ docx: 'Word only', pdf: 'PDF only' }[S.options.reportFormat]
+            || 'Word and PDF') +
+      esc(chosen ? ', using the template ' + chosen.name
+                 : ', using the report\'s own layout') +
+      '.</p></div>';
+
     html += '<div class="panel"><h3 class="sub">Included sections</h3><ul class="plain">';
     S.report.sections.forEach(function (s) {
       html += '<li>' + esc(s.label) + ' \u2014 ' +
@@ -1317,7 +1327,11 @@ function generate() {
   S.busy = true;
   S.pdf = null;
   render();
-  api('/api/session/' + S.session + '/generate', 'POST', {})
+  // What is written is decided now, not when the recording was analysed: a
+  // saved analysis loads before the reader has chosen anything.
+  api('/api/session/' + S.session + '/generate', 'POST',
+      { docxTemplate: S.options.docxTemplate || null,
+        reportFormat: S.options.reportFormat || null })
     .then(function () { poll(); })
     .catch(function (e) {
       S.busy = false;

@@ -43,7 +43,7 @@ import report_api
 # it started with. A new front end then talks to an old API and misreads what it
 # gets back - a missing field looks like an empty one. The page compares this
 # against what it expects and says to restart rather than guessing.
-API_VERSION = 6
+API_VERSION = 7
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
@@ -262,6 +262,30 @@ def runAnalysis(sessionId, study, options):
 DRAW = threading.Lock()
 
 
+def resolveTemplate(path):
+    """A usable Word template path, or (None, reason).
+
+    Checked rather than trusted. A template that could not be opened used to be
+    no template at all, silently, which is indistinguishable from the setting
+    not having been read.
+    """
+    if not path:
+        return None, None
+    path = os.path.abspath(str(path))
+    if not os.path.isfile(path):
+        return None, 'The Word template %s is not there.' % path
+    if not path.lower().endswith('.docx'):
+        return None, ('%s is not a .docx. ProfusionEEG\'s own templates are '
+                      'Word 97 .doc, which cannot be read - re-save one as '
+                      '.docx in Word and its tokens carry across.' % path)
+    try:
+        from docx import Document
+        Document(path)
+    except Exception as e:
+        return None, 'The Word template %s could not be opened: %s' % (path, e)
+    return path, None
+
+
 def generateDocument(sessionId):
     """Write the document from the analysis in memory, as the reader left it."""
     import contextlib
@@ -285,6 +309,27 @@ def generateDocument(sessionId):
     else:
         restored['dest'] = folder
 
+    # The format and the template are chosen when the document is written, not
+    # when the recording was analysed. A saved analysis is loaded before the
+    # reader has picked anything, so reading them from the analysis meant a
+    # template chosen afterwards was ignored.
+    wanted = session.get('documentOptions') or {}
+    template, templateError = resolveTemplate(wanted.get('docxTemplate'))
+    if templateError:
+        with LOCK:
+            session['status'] = 'ready'
+            session['error'] = templateError
+        return
+    reportFormat = (wanted.get('reportFormat')
+                    or (restored or {}).get('format')
+                    or getattr(instance, 'reportFormat', None)
+                    or 'both').lower()
+    if instance:
+        instance.reportFormat = reportFormat
+        instance.docxTemplate = template
+    if template:
+        print('Using the Word template %s' % os.path.basename(template))
+
     applied = report_api.applyOverrides(session['report'], session.get('overrides'))
     session['report'] = applied
     applyToResults(instance.results if instance else restored['results'], applied)
@@ -307,13 +352,15 @@ def generateDocument(sessionId):
                 import createPDF
                 fileName = restored['file_name']
                 results = restored['results']
-                fmt = (restored.get('format') or 'both').lower()
-                if fmt in ('pdf', 'both'):
+                if reportFormat in ('pdf', 'both'):
                     written['pdf'] = createPDF.writePDFFromSaved(
                         fileName, results, folder).outFile
-                if fmt in ('docx', 'both'):
+                if reportFormat in ('docx', 'both'):
+                    # The template was missing here, so a restored analysis -
+                    # which is now the normal way a study opens - always wrote
+                    # the report's own layout however the picker was set.
                     written['docx'] = createDOCX.writeDOCX(
-                        fileName, results, folder)
+                        fileName, results, folder, template=template)
                 pdf = written.get('pdf') or written.get('docx')
         pdf = pdf if (pdf and os.path.isfile(pdf)) else None
         fileName = instance.fileName if instance else restored['file_name']
@@ -739,6 +786,10 @@ class Handler(BaseHTTPRequestHandler):
                     session['status'] = 'generating'
                     session['error'] = None
                     session['pdf'] = None
+                    session['documentOptions'] = {
+                        'docxTemplate': (body or {}).get('docxTemplate'),
+                        'reportFormat': (body or {}).get('reportFormat'),
+                    }
                 threading.Thread(target=generateDocument, args=(sessionId,),
                                  daemon=True).start()
                 return self._send(202, {'status': 'generating'})
