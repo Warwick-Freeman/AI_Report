@@ -1406,12 +1406,25 @@ class writePDF:
             epoch_num=len (epochs_sub)
             colorList=[colorList]*epoch_num
                         
-            fig=epochs_sub.plot(scalings={'eeg': 60e-6, 'misc':50e-6, 'seeg':50e-6}, block=False, n_epochs=6, show=False,
-                        overview_mode='hidden', show_scrollbars=False, epoch_colors=colorList)
-            
-            # fig.grab().save('eeg5.jpg')
-            jpgFile=self.figures[5]
-            fig.savefig(jpgFile, dpi=300)
+            # The matplotlib browser, chosen here rather than relied upon.
+            #
+            # This is the only figure drawn through MNE's browser, and the
+            # browser backend is global: createPDF sets it to matplotlib at
+            # import and eeg.py sets it to qt, so which one wins depends on
+            # import order and therefore on the entry point. When qt won,
+            # epochs.plot() returned an MNEQtBrowser and the next line failed
+            # with "'MNEQtBrowser' object has no attribute 'savefig'" - at
+            # document generation, after the analysis had already been paid for.
+            #
+            # The context manager scopes the choice to this call, so drawing
+            # works whatever anything else has set, and puts back whatever was
+            # there for any interactive use that wants qt.
+            with mne.viz.use_browser_backend('matplotlib'):
+                fig=epochs_sub.plot(scalings={'eeg': 60e-6, 'misc':50e-6, 'seeg':50e-6}, block=False, n_epochs=6, show=False,
+                            overview_mode='hidden', show_scrollbars=False, epoch_colors=colorList)
+
+                jpgFile=self.figures[5]
+                fig.savefig(jpgFile, dpi=300)
             plt.close()
 
 
