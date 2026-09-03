@@ -234,9 +234,23 @@ Time base            10 s/page
 Montage sequence     Routine EEG
 ```
 
-`eetMontageChange` is deliberately not read as the montage: its text in every
-study examined is `Acquisition PC User` - who made the change, not what it was
-changed to.
+**The montage.** The initial montage comes from the study's `MontageSequences`
+folder: each XML lists its montages as ordered `MontageStep` entries, and the
+first is the one the recording opened in. The study header's own
+`default_montage` is empty in every study seen here, so without this the report
+said the montage was not recorded when the study says plainly which it was.
+05JC reads:
+
+```
+Montage                 Bipolar (initial montage, first step of the Routine EEG
+                        sequence; changed 3 time(s) during review)
+Montage sequence steps  Bipolar -> Average -> Transverse -> Summary
+```
+
+`eetMontageChange` events record that the montage being viewed was changed, so
+the changes are counted. They do not say which montage was moved to - their text
+is the user who made the change, and `EEGEventGraphs` is empty in every study
+seen here - so the destination is not invented.
 
 **Activation.** Hyperventilation, photic stimulation and cortical stimulation are
 read from their own event types, with the photic frequencies taken from

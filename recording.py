@@ -236,6 +236,81 @@ def readActivation(studyPath, events=None, analysedSeconds=None):
             'any_performed': anyPerformed}
 
 
+def readMontageSequence(studyPath, sequenceName=None):
+    """The montage sequence a study was reviewed through, in order.
+
+    A study's MontageSequences folder holds one XML per sequence, and each
+    lists its montages as ordered MontageStep entries. The first step is the
+    montage the recording opened in - SCORE asks for that, and the study
+    header's own default_montage field is empty in every study seen here.
+
+    Returns {'sequence': name, 'steps': [{'montage', 'placement'}], 'initial':
+    name} or None.
+    """
+    import xml.etree.ElementTree as ET
+
+    folder = os.path.join(studyPath.rstrip('\\/'), 'MontageSequences')
+    if not os.path.isdir(folder):
+        return None
+    files = sorted(f for f in os.listdir(folder) if f.lower().endswith('.xml'))
+    if not files:
+        return None
+
+    # Prefer the sequence the study says it used; fall back to the only one.
+    chosen = None
+    if sequenceName:
+        for name in files:
+            if os.path.splitext(name)[0].lower() == str(sequenceName).strip().lower():
+                chosen = name
+                break
+    if chosen is None:
+        if len(files) > 1 and not sequenceName:
+            # More than one and nothing says which: report them all rather than
+            # picking one and calling it the montage that was used.
+            return {'sequence': None, 'steps': [], 'initial': None,
+                    'available': [os.path.splitext(f)[0] for f in files]}
+        chosen = files[0]
+
+    try:
+        root = ET.parse(os.path.join(folder, chosen)).getroot()
+    except (ET.ParseError, OSError):
+        return None
+
+    steps = []
+    for step in root.iter('MontageStep'):
+        def value(tag):
+            node = step.find(tag)
+            return node.text.strip() if node is not None and node.text else None
+        montage = value('MontageName')
+        if montage:
+            steps.append({'montage': montage,
+                          'placement': value('ElectrodePlacement')})
+    if not steps:
+        return None
+    return {'sequence': os.path.splitext(chosen)[0], 'steps': steps,
+            'initial': steps[0]['montage'],
+            'available': [os.path.splitext(f)[0] for f in files]}
+
+
+def countMontageChanges(events):
+    """How many times the montage being viewed was changed.
+
+    The change events do not name the montage moved to - their text is the user
+    who made the change, and EEGEventGraphs is empty in every study seen here -
+    so the count is reported and the destination is not invented.
+    """
+    import eventtypes
+
+    changes = 0
+    for event in events or []:
+        if event.get('is_end_event'):
+            continue
+        resolved, _ = eventtypes.resolveTypeId(event.get('type_id'))
+        if resolved == 3:
+            changes += 1
+    return changes
+
+
 def readDevice(studyPath):
     """Acquisition device details from the study's .sdy, where they are filled in."""
     import xml.etree.ElementTree as ET
@@ -483,6 +558,29 @@ def describeRecording(studyPath, raw=None, channels=None, ageYears=None,
             conditions['Study format'] = 'ProfusionEEG %s' % device['file_version']
     else:
         conditions['Device'] = NOT_RECORDED
+
+    # The montage the recording opened in, from the montage sequence. The study
+    # header's own default_montage is empty in every study seen here, so without
+    # this the report said the montage was not recorded when the study says
+    # plainly which it was.
+    sequence = readMontageSequence(
+        studyPath, conditions.get('Montage sequence')) if isStudy else None
+    if sequence and sequence.get('initial'):
+        current = conditions.get('Montage')
+        if not current or current == NOT_RECORDED:
+            conditions['Montage'] = sequence['initial']
+        detail = ['initial montage, first step of the %s sequence'
+                  % sequence['sequence']]
+        changes = countMontageChanges(events)
+        if changes:
+            detail.append('changed %d time(s) during review' % changes)
+        conditions['Montage'] += ' (%s)' % '; '.join(detail)
+        if len(sequence['steps']) > 1:
+            conditions['Montage sequence steps'] = ' -> '.join(
+                s['montage'] for s in sequence['steps'])
+        placement = sequence['steps'][0].get('placement')
+        if placement and not conditions.get('Electrode placement'):
+            conditions['Electrode placement'] = placement
 
     out['activation'] = readActivation(studyPath, events=events) if events else None
 
