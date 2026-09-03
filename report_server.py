@@ -169,7 +169,11 @@ def runAnalysis(sessionId, study, options):
                 fileName, filePath,
                 LLM_API_KEY=apiKey or '',
                 llm_model=options.get('llm_model') or 'gemini-1.5-flash',
-                dest_pdfPath=options.get('dest_pdfPath') or './reports',
+                # Passed through: CreateReport resolves an empty destination
+                # to the study's own folder, and the handler has already put a
+                # resolved absolute path here. Defaulting to './reports' would
+                # override that.
+                dest_pdfPath=options.get('dest_pdfPath') or '',
                 autogenerate=False,
                 outputPdf=False,
                 aiReport=bool(options.get('aiReport')),
@@ -474,12 +478,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/analysis':
             study = (query.get('study') or '').strip()
-            folder, folderError = ensureOutputFolder(query.get('dest'), study)
             if not study:
                 return self._send(400, {'error': 'no study given'})
-            fileName = os.path.basename(study.rstrip('/\\'))
-            described = None if folderError else report_api.describeSavedAnalysis(
-                folder, fileName)
+            # Resolved but not created: asking whether a study has been analysed
+            # should not leave a folder behind.
+            import profusion
+            folder = os.path.abspath(
+                profusion.resolveOutputFolder(query.get('dest'), study))
+            described = (report_api.describeSavedAnalysis(folder, os.path.basename(
+                study.rstrip('/\\'))) if os.path.isdir(folder) else None)
             return self._send(200, {'study': study, 'dest': folder,
                                     'analysis': described})
 

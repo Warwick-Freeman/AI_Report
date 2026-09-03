@@ -123,8 +123,14 @@ function checkSaved() {
     render();
     return Promise.resolve();
   }
-  var q = '?study=' + encodeURIComponent(S.study) +
-    '&dest=' + encodeURIComponent(S.options.dest_pdfPath || './reports');
+  // Only send an output folder if the reader set one. Sending './reports' as a
+  // default made this look in the wrong place once outputs moved into the
+  // study's own folder, so a study that had been analysed always reported
+  // having no saved analysis and always prompted for a fresh run.
+  var q = '?study=' + encodeURIComponent(S.study);
+  if (S.options.dest_pdfPath) {
+    q += '&dest=' + encodeURIComponent(S.options.dest_pdfPath);
+  }
   return api('/api/analysis' + q).then(function (r) {
     S.saved = r.analysis || null;
     render();

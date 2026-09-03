@@ -219,7 +219,12 @@ class StudyBrowser(QMainWindow):
         # -- output --------------------------------------------------------
         outputForm = QFormLayout()
         outRow = QHBoxLayout()
-        self.outEdit = QLineEdit('./reports')
+        # Blank means the study's own folder, which is where a study's outputs
+        # belong. Pre-filling './reports' quietly collected every report into
+        # one directory instead.
+        self.outEdit = QLineEdit()
+        self.outEdit.setPlaceholderText(
+            "the study's own folder (a ProfusionEEG study gets a Report subfolder)")
         outRow.addWidget(self.outEdit, 1)
         outBrowse = QPushButton('...')
         outBrowse.setFixedWidth(30)
@@ -675,7 +680,7 @@ class StudyBrowser(QMainWindow):
 
     def _restoreOptions(self):
         s = self.settings
-        self.outEdit.setText(s.value('opt/out', './reports', type=str))
+        self.outEdit.setText(s.value('opt/out', '', type=str))
         self.pdfCheck.setChecked(s.value('opt/pdf', True, type=bool))
         self.aiCheck.setChecked(s.value('opt/ai', False, type=bool))
         self.langCombo.setCurrentText(s.value('opt/lang', 'english', type=str))
