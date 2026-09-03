@@ -55,6 +55,11 @@ DEFAULTS = {
     # analysis can be turned into a report later - in the review front end, or
     # by running again - without analysing the recording a second time.
     'analysisOnly': False,
+    # 'docx', 'pdf' or 'both'. The .docx is editable after generation, which is
+    # what a report a clinician signs needs to be.
+    'reportFormat': 'both',
+    # A .docx whose styles, header and footer the report should adopt.
+    'docxTemplate': None,
 }
 
 
@@ -202,7 +207,9 @@ def run(options):
                  patientAge=options['patientAge'],
                  autoEyeState=options['autoEyeState'],
                  stageSleep=options['stageSleep'],
-                 sleepBackend=options['sleepBackend'])
+                 sleepBackend=options['sleepBackend'],
+                 reportFormat=options['reportFormat'],
+                 docxTemplate=options['docxTemplate'])
 
     # Save the analysis so it can be reported later without running again. The
     # figures go with it: they need the epochs, which only exist now.

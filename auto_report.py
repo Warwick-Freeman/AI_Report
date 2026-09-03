@@ -148,7 +148,12 @@ class CreateReport:
                  profusionSegment='longest', profusionMaxSeconds=None,
                  patientDob=None, patientAge=None, autoEyeState=False,
                  stageSleep=True, sleepBackend='usleep', spikeDetections=None,
-                 spikeTypeIds=None
+                 spikeTypeIds=None,
+                 # 'docx', 'pdf' or 'both'. The .docx is the one a reader can
+                 # edit after generation, which is what SCORE's report is for;
+                 # the PDF is a fixed record and is what the review front end
+                 # can display in a browser tab.
+                 reportFormat='both', docxTemplate=None
                 ):
         self.benchmark = {
             'DBS': 0, # DBS
@@ -205,6 +210,10 @@ class CreateReport:
         # values, once known. Selecting events by type id is the reliable way to
         # tell a detection from a technologist's note; see spikeseizure.py.
         self.spikeTypeIds=spikeTypeIds
+        self.reportFormat=(reportFormat or 'both').lower()
+        self.docxTemplate=docxTemplate
+        # Every path written by the last writeDocument(), by format.
+        self.documentPaths={}
 
         # a native ProfusionEEG study is a folder, not a single file
         if os.path.isfile(self.eegFullName) or os.path.isdir(self.eegFullName):
@@ -636,6 +645,14 @@ class CreateReport:
 
         return raw, results
 
+    def _figureFolder(self):
+        """The output folder, with the separator the writers expect."""
+        folder = self.dest_pdfPath
+        if folder and folder[-1] not in ('\\', '/'):
+            folder += '/' if '/' in folder else '\\'
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
     def drawFigures(self):
         """Draw the report's figures without assembling the document.
 
@@ -654,10 +671,7 @@ class CreateReport:
         # assembled here. deleteJpg stays off - the figures are the point.
         drawer = _writePDF.__new__(_writePDF)
         drawer.fileName = self.fileName
-        folder = self.dest_pdfPath
-        if folder and folder[-1] not in ('\\', '/'):
-            folder += '/' if '/' in folder else '\\'
-        os.makedirs(folder, exist_ok=True)
+        folder = self._figureFolder()
         drawer.dest_folder = folder
         drawer.results = self.results
         drawer.figures = [folder + name
@@ -694,12 +708,30 @@ class CreateReport:
                 print('Conclusion generation failed: %s' % e)
 
         inputs = self._documentInputs
-        written = writePDF(self.fileName, inputs['rawData'], inputs['epochs'],
-                           inputs['psds'], results, self.dest_pdfPath,
-                           inputs['sample_rate'], inputs['ch_names'],
-                           ai_report_text)
-        # The path that was actually written, so no caller has to guess it.
-        self.documentPath = written.outFile
+        self.documentPaths = {}
+
+        # The PDF also draws the figures, which the .docx then embeds, so it
+        # runs first whenever both are asked for.
+        if self.reportFormat in ('pdf', 'both'):
+            written = writePDF(self.fileName, inputs['rawData'], inputs['epochs'],
+                               inputs['psds'], results, self.dest_pdfPath,
+                               inputs['sample_rate'], inputs['ch_names'],
+                               ai_report_text)
+            self.documentPaths['pdf'] = written.outFile
+        elif self.reportFormat == 'docx':
+            # No PDF, so the figures have to be drawn on their own.
+            self.drawFigures()
+
+        if self.reportFormat in ('docx', 'both'):
+            import createDOCX
+            self.documentPaths['docx'] = createDOCX.writeDOCX(
+                self.fileName, results, self._figureFolder(),
+                ai_report_text=ai_report_text, template=self.docxTemplate)
+
+        # The path that was actually written, so no caller has to guess it. The
+        # .docx is the one a reader edits, so it is the answer when both exist.
+        self.documentPath = (self.documentPaths.get('docx')
+                             or self.documentPaths.get('pdf'))
         return self.documentPath
     
 

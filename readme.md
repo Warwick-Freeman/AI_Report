@@ -711,6 +711,24 @@ broken; both now report what happened.
 A restored analysis finds a document written on an earlier run beside it, so
 there is no need to regenerate one just to read it.
 
+#### Word, PDF, or both
+
+The report is written as an editable **.docx** as well as a PDF. SCORE's report
+is a document a human signs, and a reader who cannot correct a wording, add a
+sentence of clinical context or delete a finding they disagree with will either
+sign something they do not quite mean or retype the whole thing.
+
+Both come from the same results, so they cannot drift apart in substance. The
+.docx uses real Word styles - Heading 1, Heading 2, Table Grid - so it restyles
+cleanly, and `docxTemplate` opens a department's own template so its styles,
+header and footer carry into the report. The figures are embedded from the same
+files the PDF uses, on a landscape section.
+
+`reportFormat` takes `docx`, `pdf` or `both`, and is a selector on Report home.
+`both` is the default: the .docx is what a reader edits, and the PDF is the fixed
+record and the one this page can display without any application installed. With
+`docx` alone the figures are still drawn, since the .docx needs them.
+
 #### Two artefacts
 
 Generation writes the report document and, beside it,
@@ -752,8 +770,8 @@ Whatever is not shown is stated rather than silently dropped.
 
 #### What it does not do yet
 
-- The document is the existing PDF. The brief asks for a **.docx** from a Word
-  template; that is not built.
+- A Word **template** is supported through `docxTemplate`, but there is no
+  template picker in the front end and no template shipped.
 - Drafts are not saved. A session lives in the server's memory: a reload keeps
   it (the session is in the URL) but restarting the server loses it.
 - **Add finding (human-scored)** on Interictal, and the per-episode semiology

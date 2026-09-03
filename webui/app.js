@@ -29,7 +29,7 @@ var RAIL = [
 
 // What this page needs from the API. The server reports its own; a lower number
 // means the server is running code older than this file.
-var API_EXPECTED = 4;
+var API_EXPECTED = 5;
 
 var PROV_LABEL = {
   measured: 'Measured',
@@ -64,6 +64,7 @@ var S = {
   eventFilter: null,
   eventRows: 200,
   pdf: null,
+  documents: {},
   data: null,
   error: null,
   polling: null,
@@ -420,6 +421,17 @@ function renderHome() {
     '</div><div style="min-width:320px;flex:1">' +
     checkbox('aiReport', 'Draft the narrative with a language model',
       aiHint, aiDisabled) +
+    '<label class="field" style="margin-top:8px"><span>Report format</span>' +
+    '<select data-opt="reportFormat">' +
+    [['both', 'Word and PDF'], ['docx', 'Word only'], ['pdf', 'PDF only']]
+      .map(function (pair) {
+        return '<option value="' + pair[0] + '"' +
+          ((o.reportFormat || 'both') === pair[0] ? ' selected' : '') + '>' +
+          pair[1] + '</option>';
+      }).join('') +
+    '</select><span class="basis">The Word document is the one a reader can ' +
+    'edit after generation. The PDF is a fixed record and is what this page ' +
+    'can display without any application installed.</span></label>' +
     '<label class="field" style="margin-top:8px"><span>Sleep backend</span>' +
     '<select data-opt="sleepBackend">' +
     ['usleep', 'yasa'].map(function (b) {
@@ -974,15 +986,27 @@ function renderGenerate() {
     }
     if (S.pdf) {
       html += '<div class="panel sunk"><h3 class="sub">Written</h3>' +
-        '<p style="margin:4px 0">' + esc(S.pdf) +
-        '<span class="basis">the report document</span></p>' +
+        (S.documents.docx
+          ? '<p style="margin:4px 0">' + esc(S.documents.docx) +
+            '<span class="basis">the report, editable in Word</span></p>' : '') +
+        (S.documents.pdf
+          ? '<p style="margin:4px 0">' + esc(S.documents.pdf) +
+            '<span class="basis">the same report as a fixed PDF</span></p>'
+          : (S.pdf ? '<p style="margin:4px 0">' + esc(S.pdf) +
+             '<span class="basis">the report document</span></p>' : '')) +
         (S.data ? '<p style="margin:4px 0">' + esc(S.data) +
           '<span class="basis">the same report as structured SCORE data, ' +
           'carrying the provenance of every value and your overrides</span></p>' : '') +
         '<div class="head-actions">' +
-        // Opened by the browser, in a new tab. Asking the server to hand it to
-        // Windows put the reader behind this window and looked like nothing.
-        '<button class="btn" data-primary id="viewBtn">View document</button>' +
+        // The .docx first: it is the one the reader can edit, which is what a
+        // report they sign has to be. The PDF is the fixed record and is what
+        // a browser can display without any application installed.
+        (S.documents.docx
+          ? '<button class="btn" data-primary id="docxBtn">Download Word document</button>'
+          : '') +
+        (S.documents.pdf || S.pdf
+          ? '<button class="btn" id="viewBtn">View PDF</button>'
+          : '') +
         '<button class="btn" id="openBtn">Open outside the browser</button>' +
         '</div>' +
         '<span class="basis" id="openNote">View opens it here, which needs no ' +
@@ -994,6 +1018,14 @@ function renderGenerate() {
   document.getElementById('main').innerHTML = html;
   var gen = document.getElementById('genBtn');
   if (gen) gen.onclick = generate;
+  var docx = document.getElementById('docxBtn');
+  if (docx) {
+    docx.onclick = function () {
+      // A download, not a tab: the browser cannot edit a .docx, and editing is
+      // the reason it exists.
+      window.location.href = '/api/session/' + S.session + '/docx';
+    };
+  }
   var view = document.getElementById('viewBtn');
   if (view) {
     view.onclick = function () {
@@ -1211,7 +1243,8 @@ function refresh() {
   return api('/api/session/' + S.session).then(function (r) {
     S.status = r.status;
     S.log = r.log || '';
-    S.pdf = r.pdf || null;
+      S.pdf = r.pdf || null;
+    S.documents = r.documents || {};
     S.data = r.data || null;
     S.restored = !!r.restored;
     S.canGenerate = r.can_generate !== false;

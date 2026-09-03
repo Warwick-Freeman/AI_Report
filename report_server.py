@@ -43,7 +43,7 @@ import report_api
 # it started with. A new front end then talks to an old API and misreads what it
 # gets back - a missing field looks like an empty one. The page compares this
 # against what it expects and says to restart rather than guessing.
-API_VERSION = 4
+API_VERSION = 5
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEBUI = os.path.join(HERE, 'webui')
@@ -192,7 +192,9 @@ def runAnalysis(sessionId, study, options):
                 autoEyeState=bool(options.get('autoEyeState')),
                 stageSleep=bool(options.get('stageSleep', True)),
                 sleepBackend=options.get('sleepBackend') or 'usleep',
-                spikeTypeIds=options.get('spikeTypeIds'))
+                spikeTypeIds=options.get('spikeTypeIds'),
+                reportFormat=options.get('reportFormat') or 'both',
+                docxTemplate=options.get('docxTemplate'))
 
             raw, results = report.process()
             report.raw = raw
@@ -263,6 +265,7 @@ def generateDocument(sessionId):
     tee = Tee(session, sys.__stdout__)
     try:
         with DRAW, contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
+            written = {}
             if instance:
                 instance.outputPdf = True
                 # The path comes back from the writer. Rebuilding it here meant
@@ -270,12 +273,21 @@ def generateDocument(sessionId):
                 # a study name containing a dot broke that agreement: the
                 # document was written and this reported that it was not.
                 pdf = instance.writeDocument()
+                written = dict(instance.documentPaths or {})
             else:
                 # No signal in memory - the figures on disk are the analysis.
+                import createDOCX
                 import createPDF
-                written = createPDF.writePDFFromSaved(
-                    restored['file_name'], restored['results'], folder)
-                pdf = written.outFile
+                fileName = restored['file_name']
+                results = restored['results']
+                fmt = (restored.get('format') or 'both').lower()
+                if fmt in ('pdf', 'both'):
+                    written['pdf'] = createPDF.writePDFFromSaved(
+                        fileName, results, folder).outFile
+                if fmt in ('docx', 'both'):
+                    written['docx'] = createDOCX.writeDOCX(
+                        fileName, results, folder)
+                pdf = written.get('pdf') or written.get('docx')
         pdf = pdf if (pdf and os.path.isfile(pdf)) else None
         fileName = instance.fileName if instance else restored['file_name']
         stem = os.path.splitext(os.path.basename(pdf))[0] if pdf \
@@ -295,6 +307,8 @@ def generateDocument(sessionId):
 
         with LOCK:
             session['pdf'] = pdf
+            session['documents'] = {k: v for k, v in written.items()
+                                    if v and os.path.isfile(v)}
             session['data'] = data
             session['status'] = 'ready'
             if not pdf:
@@ -501,25 +515,39 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {'error': 'no such session'})
             tail = parts[4] if len(parts) > 4 else ''
 
-            if tail == 'document':
+            if tail in ('document', 'docx'):
                 # Streamed to the browser rather than handed to the shell.
                 # os.startfile opens the reader on the machine running the
                 # server, and a background console process cannot take
                 # foreground focus on Windows - so the window appeared behind
                 # the browser and the button looked dead. Serving it means the
                 # browser opens it, in a tab the reader is already looking at.
-                target = session.get('pdf')
+                documents = session.get('documents') or {}
+                wanted = 'docx' if tail == 'docx' else 'pdf'
+                target = documents.get(wanted) or (
+                    session.get('pdf') if wanted == 'pdf' else None)
                 if not target or not os.path.isfile(target):
-                    return self._send(404, {'error': 'no document has been '
-                                                     'written in this session'})
+                    return self._send(404, {
+                        'error': 'no %s has been written in this session'
+                                 % wanted.upper()})
                 with open(target, 'rb') as f:
                     body = f.read()
                 self.send_response(200)
-                self.send_header('Content-Type', 'application/pdf')
+                # A .docx is offered as a download: the browser cannot edit it,
+                # and editing is the whole reason it exists.
+                if wanted == 'docx':
+                    self.send_header(
+                        'Content-Type',
+                        'application/vnd.openxmlformats-officedocument'
+                        '.wordprocessingml.document')
+                else:
+                    self.send_header('Content-Type', 'application/pdf')
                 self.send_header('Content-Length', str(len(body)))
-                self.send_header('Content-Disposition',
-                                 'inline; filename="%s"'
-                                 % os.path.basename(target))
+                self.send_header(
+                    'Content-Disposition',
+                    '%s; filename="%s"'
+                    % ('attachment' if wanted == 'docx' else 'inline',
+                       os.path.basename(target)))
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
                 try:
@@ -539,6 +567,7 @@ class Handler(BaseHTTPRequestHandler):
                 'log': logText,
                 'study': session['study'],
                 'pdf': session.get('pdf'),
+                'documents': session.get('documents') or {},
                 'data': session.get('data'),
                 'restored': bool(session.get('restored')),
                 'saved': session.get('saved'),
@@ -633,11 +662,17 @@ class Handler(BaseHTTPRequestHandler):
             # A document written on an earlier run sits beside the analysis.
             # Recording it means the reader can open what already exists
             # instead of regenerating it to get a link.
-            existing = os.path.join(
-                folder, os.path.splitext(
-                    payload.get('file_name') or fileName)[0] + '.pdf')
-            if os.path.isfile(existing):
-                SESSIONS[sessionId]['pdf'] = os.path.abspath(existing)
+            stem = os.path.splitext(payload.get('file_name') or fileName)[0]
+            found = {}
+            for kind, suffix in (('pdf', '.pdf'), ('docx', '.docx')):
+                candidate = os.path.join(folder, stem + suffix)
+                if os.path.isfile(candidate):
+                    found[kind] = os.path.abspath(candidate)
+            if found:
+                SESSIONS[sessionId]['documents'] = found
+                SESSIONS[sessionId]['pdf'] = found.get('pdf') or found.get('docx')
+            SESSIONS[sessionId]['restored']['format'] = (
+                (payload.get('options') or {}).get('reportFormat') or 'both')
 
             note = ('Loaded the analysis of %s saved %s. The recording was not '
                     'analysed again.' % (fileName, payload.get('saved')))
